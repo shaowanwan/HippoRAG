@@ -33,6 +33,7 @@ from .utils.misc_utils import NerRawOutput, TripleRawOutput
 from .utils.embed_utils import retrieve_knn
 from .utils.typing import Triple
 from .utils.config_utils import BaseConfig
+from .reasoning.controller import ReasoningController
 
 logger = logging.getLogger(__name__)
 
@@ -410,6 +411,14 @@ class HippoRAG:
             rerank_start = time.time()
             query_fact_scores = self.get_fact_scores(query)
             top_k_fact_indices, top_k_facts, rerank_log = self.rerank_facts(query, query_fact_scores)
+            if q_idx == 0:
+                print("\n===== QUERY =====")
+                print(query)
+
+                print("\n===== TOP FACTS =====")
+                for i, f in enumerate(top_k_facts[:5]):
+                    score = query_fact_scores[top_k_fact_indices[i]] if len(query_fact_scores) > 0 else None
+                    print(f"Fact {i}: {f}, score={score}")
             rerank_end = time.time()
 
             self.rerank_time += rerank_end - rerank_start
@@ -521,6 +530,136 @@ class HippoRAG:
             return queries_solutions, all_response_message, all_metadata, overall_retrieval_result, overall_qa_results
         else:
             return queries_solutions, all_response_message, all_metadata
+
+    def reasoning_retrieve(
+        self,
+        queries: List[str],
+        num_to_retrieve: int = None,
+        gold_docs: List[List[str]] = None,
+        max_rounds: int = None,
+    ) -> Tuple[List[QuerySolution], Dict, list]:
+        """Reasoning-guided iterative retrieval.
+
+        Runs multiple retrieval rounds per query. Each round:
+        1. Runs full HippoRAG retrieval with the current query
+        2. Max-pools document scores across all rounds
+        3. LLM reasons about results → rewrites query or stops
+
+        Returns:
+            (retrieval_results, eval_results_dict, round_states)
+        """
+        if max_rounds is None:
+            max_rounds = self.global_config.reasoning_max_rounds
+
+        controller = ReasoningController(self, max_rounds=max_rounds)
+        return controller.iterative_retrieve(
+            queries=queries,
+            num_to_retrieve=num_to_retrieve,
+            gold_docs=gold_docs,
+        )
+
+    def reasoning_rag_qa(
+        self,
+        queries: List[str],
+        gold_docs: List[List[str]] = None,
+        gold_answers: List[List[str]] = None,
+        max_rounds: int = None,
+    ) -> Tuple[List[QuerySolution], List[str], List[Dict], Dict, Dict]:
+        """Reasoning-guided retrieval + QA with per-round evaluation.
+
+        Runs QA for each round's retrieved docs and computes per-round EM/F1/Recall.
+        """
+        qa_em_evaluator = QAExactMatch(global_config=self.global_config)
+        qa_f1_evaluator = QAF1Score(global_config=self.global_config)
+
+        # Iterative retrieval
+        queries_solutions, retrieval_eval, round_states = self.reasoning_retrieve(
+            queries=queries,
+            gold_docs=gold_docs,
+            max_rounds=max_rounds,
+        )
+
+        # Per-round QA evaluation
+        max_rounds_used = max(len(s.round_metrics) for s in round_states)
+        per_round_qa = {}
+
+        if gold_answers is not None:
+            for r in range(max_rounds_used):
+                # Build QuerySolution for each query using round r's docs
+                round_solutions = []
+                active_queries = []
+                active_gold_answers = []
+
+                for q_idx, state in enumerate(round_states):
+                    if r < len(state.round_metrics):
+                        round_docs = state.retrieved_docs_per_round[r]
+                        round_solutions.append(QuerySolution(
+                            question=state.original_query,
+                            docs=round_docs,
+                            doc_scores=[],
+                        ))
+                        active_queries.append(q_idx)
+                        active_gold_answers.append(gold_answers[q_idx])
+
+                if not round_solutions:
+                    continue
+
+                # Run QA for this round
+                round_qa_results, _, _ = self.qa(round_solutions)
+
+                # Compute EM and F1 for this round
+                predicted = [q.answer for q in round_qa_results]
+                em_result, _ = qa_em_evaluator.calculate_metric_scores(
+                    gold_answers=active_gold_answers,
+                    predicted_answers=predicted,
+                    aggregation_fn=np.max,
+                )
+                f1_result, _ = qa_f1_evaluator.calculate_metric_scores(
+                    gold_answers=active_gold_answers,
+                    predicted_answers=predicted,
+                    aggregation_fn=np.max,
+                )
+
+                # Get per-round recall from retrieval_eval
+                round_recall = retrieval_eval.get(f"round_{r}", {})
+
+                per_round_qa[f"round_{r}"] = {
+                    "n_queries": len(active_queries),
+                    **{k: round(float(v), 4) for k, v in em_result.items()},
+                    **{k: round(float(v), 4) for k, v in f1_result.items()},
+                    **round_recall,
+                }
+                logger.info(f"Round {r} QA: {per_round_qa[f'round_{r}']}")
+
+        # Final QA on the final retrieved docs
+        queries_solutions, all_response_message, all_metadata = self.qa(queries_solutions)
+
+        overall_qa_results = {}
+        if gold_answers is not None:
+            overall_qa_em_result, _ = qa_em_evaluator.calculate_metric_scores(
+                gold_answers=gold_answers,
+                predicted_answers=[q.answer for q in queries_solutions],
+                aggregation_fn=np.max,
+            )
+            overall_qa_f1_result, _ = qa_f1_evaluator.calculate_metric_scores(
+                gold_answers=gold_answers,
+                predicted_answers=[q.answer for q in queries_solutions],
+                aggregation_fn=np.max,
+            )
+            overall_qa_em_result.update(overall_qa_f1_result)
+            overall_qa_results = {k: round(float(v), 4) for k, v in overall_qa_em_result.items()}
+            logger.info(f"Final QA results: {overall_qa_results}")
+
+            for idx, q in enumerate(queries_solutions):
+                q.gold_answers = list(gold_answers[idx])
+                if gold_docs is not None:
+                    q.gold_docs = gold_docs[idx]
+
+        # Merge per-round QA into retrieval_eval
+        retrieval_eval["per_round_qa"] = per_round_qa
+        retrieval_eval["final_qa"] = overall_qa_results
+
+        return queries_solutions, all_response_message, all_metadata, retrieval_eval, overall_qa_results
 
     def retrieve_dpr(self,
                      queries: List[str],
@@ -1444,6 +1583,13 @@ class HippoRAG:
         phrases_and_ids = set()
 
         for rank, f in enumerate(top_k_facts):
+            if rank == 0:
+                print("\n===== FACT ENTITY CHECK =====")
+                print("Fact:", f)
+
+                print("Subject:", f[0])
+                print("Object:", f[2])
+
             subject_phrase = f[0].lower()
             predicate_phrase = f[1].lower()
             object_phrase = f[2].lower()
@@ -1456,6 +1602,18 @@ class HippoRAG:
                     prefix="entity-"
                 )
                 phrase_id = self.node_name_to_vertex_idx.get(phrase_key, None)
+
+                # ===== DEBUG: 查看 graph 节点真实文本 =====
+                print("\n===== GRAPH NODE DEBUG =====")
+                print("Phrase text:", phrase)
+                print("Computed hash:", phrase_key)
+                print("Exists in graph:", phrase_id is not None)
+
+                if phrase_id is not None:
+                    node_vertex = self.graph.vs[phrase_id]
+                    node_content = node_vertex["content"] if "content" in node_vertex.attributes() else None
+                    print("Graph node content:", node_content)
+                print("=============================\n")
 
                 if phrase_id is not None:
                     weighted_fact_score = fact_score
@@ -1500,6 +1658,17 @@ class HippoRAG:
         #Combining phrase and passage scores into one array for PPR
         node_weights = phrase_weights + passage_weights
 
+        print("\n===== PPR SEEDS (Top 10) =====")
+
+        top_indices = np.argsort(node_weights)[::-1][:10]
+
+        for idx in top_indices:
+            w = node_weights[idx]
+            if w > 0:
+                print(self.graph.vs[idx]["content"], "weight=", w)
+
+        print("==============================\n")
+
         #Recording top 30 facts in linking_score_map
         if len(linking_score_map) > 30:
             linking_score_map = dict(sorted(linking_score_map.items(), key=lambda x: x[1], reverse=True)[:30])
@@ -1510,7 +1679,13 @@ class HippoRAG:
         ppr_start = time.time()
         ppr_sorted_doc_ids, ppr_sorted_doc_scores = self.run_ppr(node_weights, damping=self.global_config.damping)
         ppr_end = time.time()
-
+        # ===== DEBUG: 打印 PPR 排序后的 passage =====
+        print("\n===== TOP PPR PASSAGES =====")
+        for doc_id in ppr_sorted_doc_ids[:5]:
+            passage_key = self.passage_node_keys[doc_id]
+            passage_text = self.chunk_embedding_store.get_row(passage_key)["content"]
+            print(passage_text[:200])
+        print("=============================\n")
         self.ppr_time += (ppr_end - ppr_start)
 
         assert len(ppr_sorted_doc_ids) == len(
@@ -1554,7 +1729,21 @@ class HippoRAG:
             real_candidate_fact_ids = [self.fact_node_keys[idx] for idx in candidate_fact_indices]
             fact_row_dict = self.fact_embedding_store.get_rows(real_candidate_fact_ids)
             candidate_facts = [eval(fact_row_dict[id]['content']) for id in real_candidate_fact_ids]
-            
+
+            print("\n===== RERANK DEBUG =====")
+            print("Candidate facts before rerank:", len(candidate_facts))
+
+            if self.global_config.rerank_dspy_file_path is None:
+                print(">>> RERANK SKIPPED <<<")
+                return candidate_fact_indices, candidate_facts, {
+                    'facts_before_rerank': candidate_facts,
+                    'facts_after_rerank': candidate_facts
+                }
+
+            for f in candidate_facts[:3]:
+                print("  ", f)
+
+
             # Rerank the facts
             top_k_fact_indices, top_k_facts, reranker_dict = self.rerank_filter(query,
                                                                                 candidate_facts,
@@ -1562,7 +1751,10 @@ class HippoRAG:
                                                                                 len_after_rerank=link_top_k)
             
             rerank_log = {'facts_before_rerank': candidate_facts, 'facts_after_rerank': top_k_facts}
-            
+
+            print("Facts after rerank:", len(top_k_facts))
+            print("=========================\n")
+
             return top_k_fact_indices, top_k_facts, rerank_log
             
         except Exception as e:

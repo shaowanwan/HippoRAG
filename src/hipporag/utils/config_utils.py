@@ -192,6 +192,16 @@ class BaseConfig:
         default=5,
         metadata={"help": "Feeding top k documents to the QA model for reading."}
     )
+
+    # Reasoning-guided iterative retrieval
+    reasoning_max_rounds: int = field(
+        default=3,
+        metadata={"help": "Maximum number of reasoning-guided retrieval rounds per query."}
+    )
+    reasoning_enabled: bool = field(
+        default=False,
+        metadata={"help": "Whether to enable reasoning-guided iterative retrieval."}
+    )
     
     # Save dir (highest level directory)
     save_dir: str = field(
