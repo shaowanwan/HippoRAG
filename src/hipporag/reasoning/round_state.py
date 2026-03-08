@@ -28,6 +28,7 @@ class RetrievalRoundState:
     retrieved_docs_per_round: List[List[str]] = field(default_factory=list)
     round_metrics: List[RoundMetrics] = field(default_factory=list)
     reasoning_traces: List[str] = field(default_factory=list)
+    discovered_entities: list = field(default_factory=list)  # [(name, vertex_id), ...]
 
     def record_round(self, docs: List[str], metrics: Dict[str, float], query_used: str):
         self.retrieved_docs_per_round.append(docs)

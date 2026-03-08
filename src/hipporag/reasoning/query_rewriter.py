@@ -8,23 +8,23 @@ logger = logging.getLogger(__name__)
 # Timeout for reasoning LLM calls (seconds)
 REASONING_TIMEOUT = 60
 
-REWRITE_SYSTEM_PROMPT = """You are a retrieval reasoning assistant. Given an original query, the documents retrieved so far, and optionally a reasoning trace, your job is to:
+REWRITE_SYSTEM_PROMPT = """You are a retrieval reasoning assistant for multi-hop questions. Given an original query, the documents retrieved so far, and optionally a reasoning trace, your job is to:
 
 1. Analyze what information has been found and what is still missing.
-2. Decide whether the retrieved documents already contain sufficient information to answer the query.
-3. If not, rewrite the query to better target the missing information.
+2. Identify key entities in the retrieved documents that bridge to the missing information.
+3. Decide whether to continue retrieval or stop.
 
 Respond in JSON format:
 {
     "analysis": "Brief analysis of what's found vs missing",
-    "rewritten_query": "The rewritten query targeting missing info",
+    "discovered_entities": ["entity1", "entity2"],
     "should_stop": false
 }
 
 Rules:
-- If the retrieved documents already contain sufficient information to answer the query, set should_stop=true and leave rewritten_query empty.
-- Rewritten query should be a natural language question, not keywords.
-- Focus on what information is missing and craft the query to find it.
+- If the retrieved documents already contain sufficient information to answer the query, set should_stop=true.
+- "discovered_entities" should list key entities found in the retrieved documents that are important for answering the query but were NOT in the original query. These are bridge entities that connect what's been found to what's still needed. Use lowercase. List 1-5 entities max.
+- Focus on entities that appear in the documents and could lead to the missing information.
 """
 
 
@@ -35,13 +35,12 @@ def build_rewrite_prompt(
     round_idx: int,
     previous_traces: List[str] = None,
 ) -> List[dict]:
-    """Build the LLM prompt for query rewriting."""
+    """Build the LLM prompt for entity discovery."""
     docs_text = ""
     for i, doc in enumerate(retrieved_docs[:10]):
         docs_text += f"[Doc {i+1}] {doc[:500]}\n\n"
 
     user_content = f"""Original query: {original_query}
-Current query (round {round_idx}): {current_query}
 
 Retrieved documents so far:
 {docs_text}"""
@@ -60,7 +59,7 @@ Retrieved documents so far:
 
 
 class QueryRewriter:
-    """Uses LLM reasoning to rewrite queries for the next retrieval round."""
+    """Uses LLM reasoning to discover bridge entities for graph reshape."""
 
     def __init__(self, llm_model):
         self.llm_model = llm_model
@@ -73,10 +72,10 @@ class QueryRewriter:
         round_idx: int,
         previous_traces: List[str] = None,
     ) -> dict:
-        """Call LLM to reason about retrieval results and rewrite query.
+        """Call LLM to reason about retrieval results and discover bridge entities.
 
         Returns:
-            dict with keys: analysis, rewritten_query, should_stop
+            dict with keys: analysis, discovered_entities, should_stop
         """
         messages = build_rewrite_prompt(
             original_query=original_query,
@@ -104,14 +103,14 @@ class QueryRewriter:
             logger.warning(f"QueryRewriter timed out after {REASONING_TIMEOUT}s")
             return {
                 "analysis": "Timed out",
-                "rewritten_query": current_query,
+                "discovered_entities": [],
                 "should_stop": True,
             }
         except Exception as e:
             logger.error(f"QueryRewriter failed: {e}")
             return {
                 "analysis": f"Error: {e}",
-                "rewritten_query": current_query,
+                "discovered_entities": [],
                 "should_stop": True,
             }
 
@@ -119,7 +118,7 @@ class QueryRewriter:
         """Parse LLM response JSON, with fallbacks for malformed output."""
         defaults = {
             "analysis": "",
-            "rewritten_query": "",
+            "discovered_entities": [],
             "should_stop": False,
         }
 
@@ -134,6 +133,12 @@ class QueryRewriter:
             for key in defaults:
                 if key not in parsed:
                     parsed[key] = defaults[key]
+            # Ensure discovered_entities is a list of strings
+            if not isinstance(parsed["discovered_entities"], list):
+                parsed["discovered_entities"] = []
+            parsed["discovered_entities"] = [
+                str(e).lower().strip() for e in parsed["discovered_entities"] if e
+            ][:5]
             return parsed
         except (json.JSONDecodeError, IndexError) as e:
             logger.warning(f"Failed to parse rewriter response: {e}")

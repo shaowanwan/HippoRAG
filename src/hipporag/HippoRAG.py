@@ -1548,7 +1548,8 @@ class HippoRAG:
                                         query_fact_scores: np.ndarray,
                                         top_k_facts: List[Tuple],
                                         top_k_fact_indices: List[str],
-                                        passage_node_weight: float = 0.05) -> Tuple[np.ndarray, np.ndarray]:
+                                        passage_node_weight: float = 0.05,
+                                        return_node_weights: bool = False) -> Tuple[np.ndarray, np.ndarray]:
         """
         Computes document scores based on fact-based similarity and relevance using personalized
         PageRank (PPR) and dense retrieval models. This function combines the signal from the relevant
@@ -1691,6 +1692,8 @@ class HippoRAG:
         assert len(ppr_sorted_doc_ids) == len(
             self.passage_node_idxs), f"Doc prob length {len(ppr_sorted_doc_ids)} != corpus length {len(self.passage_node_idxs)}"
 
+        if return_node_weights:
+            return ppr_sorted_doc_ids, ppr_sorted_doc_scores, node_weights
         return ppr_sorted_doc_ids, ppr_sorted_doc_scores
 
 
@@ -1763,7 +1766,8 @@ class HippoRAG:
     
     def run_ppr(self,
                 reset_prob: np.ndarray,
-                damping: float =0.5) -> Tuple[np.ndarray, np.ndarray]:
+                damping: float =0.5,
+                graph=None) -> Tuple[np.ndarray, np.ndarray]:
         """
         Runs Personalized PageRank (PPR) on a graph and computes relevance scores for
         nodes corresponding to document passages. The method utilizes a damping
@@ -1787,8 +1791,9 @@ class HippoRAG:
         """
 
         if damping is None: damping = 0.5 # for potential compatibility
+        g = graph if graph is not None else self.graph
         reset_prob = np.where(np.isnan(reset_prob) | (reset_prob < 0), 0, reset_prob)
-        pagerank_scores = self.graph.personalized_pagerank(
+        pagerank_scores = g.personalized_pagerank(
             vertices=range(len(self.node_name_to_vertex_idx)),
             damping=damping,
             directed=False,
