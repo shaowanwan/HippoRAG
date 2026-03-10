@@ -1,6 +1,6 @@
 import logging
 import time
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -17,12 +17,12 @@ DEFAULT_ENTITY_SEED_WEIGHT = 0.5
 
 
 class ReasoningController:
-    """Orchestrates multi-round reasoning-guided retrieval with graph reshape.
+    """Orchestrates multi-round reasoning-guided retrieval.
 
-    Round 0: Full HippoRAG retrieval (fact matching + DPR + PPR) for max recall.
-    Round 1+: Pure graph operations — LLM discovers bridge entities, modify PPR
-              seeds and graph edges, re-run PPR only (no DPR/fact matching).
-    All rounds accumulated via RRF.
+    Each round:
+      1. Run full HippoRAG retrieval with the current (rewritten) query → RRF
+      2. LLM reasons → rewrite query + discover bridge entities
+      3. Resolve entities → seed expansion + bridge edges → extra PPR → RRF
     """
 
     def __init__(self, hipporag, max_rounds: int = 3):
@@ -69,7 +69,7 @@ class ReasoningController:
 
         return all_results, eval_results, all_round_states
 
-    # ── Entity resolution ──────────────────────────────────────────────
+    # ── Entity resolution (from Exp 2) ─────────────────────────────────
 
     def _find_entity_in_graph(self, entity_name: str) -> Optional[int]:
         """Find an entity in the graph by exact hash match. Returns vertex index or None."""
@@ -125,7 +125,16 @@ class ReasoningController:
 
         return resolved
 
-    # ── Graph reshape ──────────────────────────────────────────────────
+    # ── Graph reshape (from Exp 2) ─────────────────────────────────────
+
+    def _get_existing_seed_ids(self, base_node_weights: np.ndarray) -> List[int]:
+        """Extract entity vertex IDs that have non-zero weight in base PPR seeds."""
+        passage_idx_set = set(self.hipporag.passage_node_idxs)
+        seed_ids = []
+        for vid in range(len(base_node_weights)):
+            if base_node_weights[vid] > 0 and vid not in passage_idx_set:
+                seed_ids.append(vid)
+        return seed_ids
 
     def _build_overlay(
         self,
@@ -139,13 +148,11 @@ class ReasoningController:
         overlay = GraphOverlay(self.hipporag.graph)
         bridge_weight = 1.0
 
-        # Bridge: discovered <-> existing seeds
         for d_vid in discovered_vertex_ids:
             for s_vid in existing_seed_vertex_ids:
                 if d_vid != s_vid:
                     overlay.add_reasoning_edge(d_vid, s_vid, bridge_weight)
 
-        # Also connect discovered entities to each other
         for i, d1 in enumerate(discovered_vertex_ids):
             for d2 in discovered_vertex_ids[i+1:]:
                 overlay.add_reasoning_edge(d1, d2, bridge_weight)
@@ -155,23 +162,18 @@ class ReasoningController:
             return overlay
         return None
 
-    def _get_existing_seed_ids(self, base_node_weights: np.ndarray) -> List[int]:
-        """Extract entity vertex IDs that have non-zero weight in base PPR seeds."""
-        hip = self.hipporag
-        passage_idx_set = set(hip.passage_node_idxs)
-        seed_ids = []
-        for vid in range(len(base_node_weights)):
-            if base_node_weights[vid] > 0 and vid not in passage_idx_set:
-                seed_ids.append(vid)
-        return seed_ids
-
     # ── Retrieval ──────────────────────────────────────────────────────
 
-    def _retrieve_round0(self, query: str) -> Tuple[np.ndarray, np.ndarray, Optional[np.ndarray]]:
-        """Round 0: Full HippoRAG retrieval. Returns (sorted_doc_ids, sorted_doc_scores, node_weights)."""
+    def _retrieve_single_query(self, query: str) -> Tuple[np.ndarray, np.ndarray, Optional[np.ndarray]]:
+        """Run full HippoRAG retrieval for a single query.
+
+        Returns:
+            (sorted_doc_ids, sorted_doc_scores, node_weights)
+        """
         hip = self.hipporag
 
         hip.get_query_embeddings([query])
+
         query_fact_scores = hip.get_fact_scores(query)
         top_k_fact_indices, top_k_facts, rerank_log = hip.rerank_facts(query, query_fact_scores)
 
@@ -191,48 +193,19 @@ class ReasoningController:
             )
             return sorted_doc_ids, sorted_doc_scores, node_weights
 
-    def _retrieve_ppr_only(
-        self,
-        node_weights: np.ndarray,
-        extra_entity_weights: Dict[str, int] = None,
-        overlay: GraphOverlay = None,
-    ) -> Tuple[np.ndarray, np.ndarray]:
-        """Round 1+: Pure PPR with modified seeds and optional overlay graph."""
-        hip = self.hipporag
-
-        # Copy base weights and add extra entity seeds
-        modified_weights = node_weights.copy()
-        if extra_entity_weights:
-            for name, vid in extra_entity_weights.items():
-                modified_weights[vid] += DEFAULT_ENTITY_SEED_WEIGHT
-                logger.info(f"  PPR seed added: '{name}' -> vertex {vid}, weight +{DEFAULT_ENTITY_SEED_WEIGHT}")
-
-        if np.sum(modified_weights) == 0:
-            logger.warning("  No PPR seeds, falling back to DPR.")
-            return hip.dense_passage_retrieval("")
-
-        # Run PPR on (optionally modified) graph
-        working_graph = overlay.get_working_graph() if overlay else None
-        sorted_doc_ids, sorted_doc_scores = hip.run_ppr(
-            modified_weights,
-            damping=hip.global_config.damping,
-            graph=working_graph,
-        )
-        return sorted_doc_ids, sorted_doc_scores
-
     def _iterative_retrieve_single(
         self,
         state: RetrievalRoundState,
         num_to_retrieve: int,
         gold_docs_for_query: Optional[List[str]] = None,
     ) -> QuerySolution:
-        """Run iterative retrieval: Round 0 full retrieval, Round 1+ pure graph reshape."""
+        """Run iterative retrieval: full pipeline + query rewrite + entity seed expansion + RRF."""
         hip = self.hipporag
         num_docs = len(hip.passage_node_keys)
         rrf_k = 60
 
         rrf_scores = np.zeros(num_docs)
-        base_node_weights = None  # Saved from round 0
+        base_node_weights = None
         all_discovered = {}  # name -> vertex_id, accumulated across rounds
 
         for round_i in range(self.max_rounds):
@@ -241,34 +214,43 @@ class ReasoningController:
 
             logger.info(f"  Round {round_i}: query='{state.current_query[:60]}...'")
 
-            if round_i == 0:
-                # Round 0: Full retrieval for max recall
-                sorted_doc_ids, sorted_doc_scores, base_node_weights = self._retrieve_round0(state.current_query)
-            else:
-                # Round 1+: Pure graph operation with entity expansion
-                if base_node_weights is None:
-                    # Fallback: no node_weights from round 0 (DPR fallback), do full retrieval
-                    sorted_doc_ids, sorted_doc_scores, nw = self._retrieve_round0(state.current_query)
-                    if nw is not None:
-                        base_node_weights = nw
-                else:
-                    # Build overlay and run PPR only
-                    existing_seeds = self._get_existing_seed_ids(base_node_weights)
-                    overlay = self._build_overlay(
-                        discovered_vertex_ids=list(all_discovered.values()),
-                        existing_seed_vertex_ids=existing_seeds,
-                    )
-                    sorted_doc_ids, sorted_doc_scores = self._retrieve_ppr_only(
-                        node_weights=base_node_weights,
-                        extra_entity_weights=all_discovered,
-                        overlay=overlay,
-                    )
+            # Step 1: Full retrieval with current query
+            sorted_doc_ids, sorted_doc_scores, node_weights = self._retrieve_single_query(state.current_query)
+            if node_weights is not None:
+                base_node_weights = node_weights
 
-            # RRF accumulate
+            # Step 2: RRF accumulate
             for rank, doc_id in enumerate(sorted_doc_ids):
                 rrf_scores[doc_id] += 1.0 / (rrf_k + rank + 1)
 
-            # Build current top-k from RRF
+            # Step 3: If we have discovered entities from previous rounds, run expanded PPR
+            if all_discovered and base_node_weights is not None:
+                modified_weights = base_node_weights.copy()
+                for name, vid in all_discovered.items():
+                    modified_weights[vid] += DEFAULT_ENTITY_SEED_WEIGHT
+
+                existing_seeds = self._get_existing_seed_ids(base_node_weights)
+                overlay = self._build_overlay(
+                    discovered_vertex_ids=list(all_discovered.values()),
+                    existing_seed_vertex_ids=existing_seeds,
+                )
+
+                working_graph = overlay.get_working_graph() if overlay else None
+                boosted_doc_ids, boosted_doc_scores = hip.run_ppr(
+                    modified_weights,
+                    damping=hip.global_config.damping,
+                    graph=working_graph,
+                )
+
+                for rank, doc_id in enumerate(boosted_doc_ids):
+                    rrf_scores[doc_id] += 1.0 / (rrf_k + rank + 1)
+
+                logger.info(
+                    f"  Seed expansion PPR: {len(all_discovered)} entities, "
+                    f"bridge edges: {overlay.num_temp_edges if overlay else 0}"
+                )
+
+            # Build current result from RRF scores
             final_sorted_ids = np.argsort(rrf_scores)[::-1]
             top_k_docs = [
                 hip.chunk_embedding_store.get_row(hip.passage_node_keys[idx])["content"]
@@ -300,7 +282,7 @@ class ReasoningController:
             if round_i == self.max_rounds - 1:
                 break
 
-            # LLM reasoning -> discover bridge entities
+            # Step 4: LLM reasoning -> rewrite query + discover entities
             reasoning_output = self.query_rewriter.reason_and_rewrite(
                 original_query=state.original_query,
                 current_query=state.current_query,
@@ -315,7 +297,13 @@ class ReasoningController:
                 logger.info(f"  Reasoning says stop at round {round_i}.")
                 break
 
-            # Entity seed expansion
+            # Query rewrite (from Exp 1)
+            new_query = reasoning_output.get("rewritten_query", "")
+            if new_query and new_query != state.current_query:
+                logger.info(f"  Query rewritten: '{new_query[:60]}...'")
+                state.current_query = new_query
+
+            # Entity seed expansion (from Exp 2)
             discovered_entities = reasoning_output.get("discovered_entities", [])
             if discovered_entities:
                 logger.info(f"  Discovered entities: {discovered_entities}")
@@ -326,7 +314,7 @@ class ReasoningController:
                 )
                 logger.info(f"  Total resolved entities: {len(all_discovered)}")
 
-        # Final result
+        # Final result from RRF scores
         final_sorted_ids = np.argsort(rrf_scores)[::-1]
         final_docs = [
             hip.chunk_embedding_store.get_row(hip.passage_node_keys[idx])["content"]
@@ -394,8 +382,5 @@ class ReasoningController:
 
         entities_per_query = [len(s.discovered_entities) for s in all_round_states]
         eval_results["avg_entities_discovered"] = round(np.mean(entities_per_query), 2)
-        eval_results["entity_resolve_rate"] = round(
-            np.mean([1 if len(s.discovered_entities) > 0 else 0 for s in all_round_states]), 4
-        )
 
         return eval_results
