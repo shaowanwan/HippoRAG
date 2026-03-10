@@ -15,6 +15,10 @@ logger = logging.getLogger(__name__)
 # Default weight for discovered entity seeds
 DEFAULT_ENTITY_SEED_WEIGHT = 0.5
 
+# RRF round weight: later rounds contribute more
+# Round i weight = 1.0 + i * RRF_ROUND_BOOST
+RRF_ROUND_BOOST = 0.5
+
 
 class ReasoningController:
     """Orchestrates multi-round reasoning-guided retrieval.
@@ -219,9 +223,10 @@ class ReasoningController:
             if node_weights is not None:
                 base_node_weights = node_weights
 
-            # Step 2: RRF accumulate
+            # Step 2: RRF accumulate (later rounds weighted higher)
+            round_weight = 1.0 + round_i * RRF_ROUND_BOOST
             for rank, doc_id in enumerate(sorted_doc_ids):
-                rrf_scores[doc_id] += 1.0 / (rrf_k + rank + 1)
+                rrf_scores[doc_id] += round_weight / (rrf_k + rank + 1)
 
             # Step 3: If we have discovered entities from previous rounds, run expanded PPR
             if all_discovered and base_node_weights is not None:
@@ -243,11 +248,12 @@ class ReasoningController:
                 )
 
                 for rank, doc_id in enumerate(boosted_doc_ids):
-                    rrf_scores[doc_id] += 1.0 / (rrf_k + rank + 1)
+                    rrf_scores[doc_id] += round_weight / (rrf_k + rank + 1)
 
                 logger.info(
                     f"  Seed expansion PPR: {len(all_discovered)} entities, "
-                    f"bridge edges: {overlay.num_temp_edges if overlay else 0}"
+                    f"bridge edges: {overlay.num_temp_edges if overlay else 0}, "
+                    f"round_weight: {round_weight:.1f}"
                 )
 
             # Build current result from RRF scores
