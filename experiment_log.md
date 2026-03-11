@@ -282,3 +282,76 @@ Each round executes the following steps:
 - Higher damping lets bridge entities propagate further through graph, finding more relevant passages
 - EM unchanged (+9.5%) because the newly found passages hit QA bottleneck cases (docs found but QA model fails)
 - Potential next steps: increase qa_top_k, optimize QA prompt, or use stronger LLM
+
+---
+
+## Exp 8: Degree-Adaptive Weights (2026-03-11)
+- **Branch**: feature/graph-reshape
+- **Method**: Exp 7 + degree-adaptive weights for both bridge edges and entity seeds
+  - Weight formula: `weight = base × (1 + log(degree + 1))`
+  - High-degree hub nodes get proportionally heavier weights to resist PPR probability dilution
+  - Applied to both bridge edge weights and entity seed weights
+
+### Code Changes vs Exp 7
+The only change is in `controller.py`:
+
+1. **New method `_degree_adaptive_weight(vid, base_weight)`**:
+   - Returns `base_weight × (1 + log(degree + 1))`
+   - Degree=3 (median entity) → multiplier ≈ 2.4×
+   - Degree=50 → multiplier ≈ 4.9×
+   - Degree=145 (max observed) → multiplier ≈ 6.0×
+
+2. **Bridge edge weights** (previously fixed 1.0):
+   - Now: `bridge_weight = degree_adaptive_weight(vid, 1.0)` per discovered entity
+   - Inter-discovered edges: `max(weight_d1, weight_d2)`
+
+3. **Entity seed weights** (previously fixed 0.5):
+   - Now: `seed_weight = degree_adaptive_weight(vid, 0.5)`
+   - Note: only relative ratios matter (PPR normalizes reset_prob)
+
+### Key Parameters (cumulative from Exp 6+7+8)
+| Parameter | Value | Description |
+|-----------|-------|-------------|
+| RRF_ROUND_BOOST | 0.5 | Round i weight = 1.0 + i × 0.5 (Exp 6) |
+| EXPANSION_DAMPING | 0.7 | Seed expansion PPR damping (Exp 7) |
+| DEFAULT_ENTITY_SEED_WEIGHT | 0.5 | Base weight before degree scaling (Exp 8) |
+| bridge_edge_base | 1.0 | Base weight before degree scaling (Exp 8) |
+| degree_adaptive | log(deg+1) | Scaling factor for weights (Exp 8) |
+
+### Results (2 runs for robustness)
+| Metric | Baseline | Run 1 | Run 2 | Avg Delta |
+|--------|----------|-------|-------|-----------|
+| EM     | 0.420    | 0.525 | 0.520 | **+10.3%** |
+| F1     | 0.512    | 0.614 | 0.609 | **+9.9%** |
+| R@5    | 0.672    | 0.818 | 0.817 | **+14.8%** |
+
+### Statistics
+- Avg reasoning rounds: 1.80
+- Total time: ~6-9 min
+
+### Comparison with All Experiments
+| Exp | Method | EM Δ | F1 Δ | R@5 Δ |
+|-----|--------|------|------|-------|
+| 1 | Query rewrite only | +4.0% | +5.1% | +11.2% |
+| 2 | Seed expansion only | +3.0% | +2.9% | +4.2% |
+| 3 | Combined (uncommitted) | +5.5% | +5.3% | +10.6% |
+| 4 | Combined (committed) | +8.0% | +6.69% | +13.37% |
+| 5 | + Virtual entity nodes | +8.0% | +6.69% | +13.54% |
+| 6 | + Weighted RRF | +9.5% | +9.23% | +14.04% |
+| 7 | + Expansion damping 0.7 | +9.5% | +9.37% | +15.17% |
+| **8** | **+ Degree-adaptive (log)** | **+10.3%** | **+9.9%** | **+14.8%** |
+
+### Failed Experiments (after Exp 8)
+| Exp | Method | EM Δ | Result |
+|-----|--------|------|--------|
+| 9 | Degree×rarity (TF-IDF style) | +9.0% | Worse — rarity penalized good bridge entities |
+| 10 | sqrt + per-round seed scaling | +9.5% | Worse — sqrt over-compensated, seed scaling diluted by normalization |
+| 11 | log + per-round bridge scaling | +9.5% | Worse — stronger bridges over-concentrated PPR probability |
+
+### Analysis
+- **Best EM/F1 across all experiments** — degree-adaptive log weights provide the best balance
+- Log compression (vs sqrt or linear) avoids high-degree hubs dominating PPR diffusion while still compensating for dilution
+- Per-round weight scaling (seed or bridge) does not help:
+  - Seed weights: PPR normalizes reset_prob → absolute values don't matter, only ratios
+  - Bridge weights: stronger edges over-concentrate probability at bridge-connected nodes
+- Results are robust across 2 independent runs (±0.5% variance)

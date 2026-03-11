@@ -1,4 +1,5 @@
 import logging
+import math
 import time
 from typing import Dict, List, Optional, Tuple
 
@@ -143,6 +144,11 @@ class ReasoningController:
                 seed_ids.append(vid)
         return seed_ids
 
+    def _degree_adaptive_weight(self, vid: int, base_weight: float) -> float:
+        """Scale weight by log(degree) to resist dilution at high-degree nodes."""
+        deg = self.hipporag.graph.degree(vid)
+        return base_weight * (1.0 + math.log(deg + 1))
+
     def _build_overlay(
         self,
         discovered_vertex_ids: List[int],
@@ -153,16 +159,18 @@ class ReasoningController:
             return None
 
         overlay = GraphOverlay(self.hipporag.graph)
-        bridge_weight = 1.0
 
         for d_vid in discovered_vertex_ids:
+            bridge_weight = self._degree_adaptive_weight(d_vid, 1.0)
             for s_vid in existing_seed_vertex_ids:
                 if d_vid != s_vid:
                     overlay.add_reasoning_edge(d_vid, s_vid, bridge_weight)
 
         for i, d1 in enumerate(discovered_vertex_ids):
             for d2 in discovered_vertex_ids[i+1:]:
-                overlay.add_reasoning_edge(d1, d2, bridge_weight)
+                w = max(self._degree_adaptive_weight(d1, 1.0),
+                        self._degree_adaptive_weight(d2, 1.0))
+                overlay.add_reasoning_edge(d1, d2, w)
 
         if overlay.num_temp_edges > 0:
             logger.info(f"  GraphOverlay: {overlay.summary()}")
@@ -235,7 +243,7 @@ class ReasoningController:
             if all_discovered and base_node_weights is not None:
                 modified_weights = base_node_weights.copy()
                 for name, vid in all_discovered.items():
-                    modified_weights[vid] += DEFAULT_ENTITY_SEED_WEIGHT
+                    modified_weights[vid] += self._degree_adaptive_weight(vid, DEFAULT_ENTITY_SEED_WEIGHT)
 
                 existing_seeds = self._get_existing_seed_ids(base_node_weights)
                 overlay = self._build_overlay(
