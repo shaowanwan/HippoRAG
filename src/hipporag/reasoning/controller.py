@@ -19,6 +19,9 @@ DEFAULT_ENTITY_SEED_WEIGHT = 0.5
 # Round i weight = 1.0 + i * RRF_ROUND_BOOST
 RRF_ROUND_BOOST = 0.5
 
+# Damping for seed expansion PPR (higher = bridge entities spread further)
+EXPANSION_DAMPING = 0.7
+
 
 class ReasoningController:
     """Orchestrates multi-round reasoning-guided retrieval.
@@ -243,7 +246,7 @@ class ReasoningController:
                 working_graph = overlay.get_working_graph() if overlay else None
                 boosted_doc_ids, boosted_doc_scores = hip.run_ppr(
                     modified_weights,
-                    damping=hip.global_config.damping,
+                    damping=EXPANSION_DAMPING,
                     graph=working_graph,
                 )
 

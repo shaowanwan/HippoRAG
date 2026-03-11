@@ -235,7 +235,50 @@ Each round executes the following steps:
 **Retrieval bottleneck (56 cases)**: All missing docs found in top-20, just ranked too low. 23 in top-10, 33 in top-20.
 
 ### Analysis
-- **Best results so far** — EM +9.5%, R@5 +14.04%
 - Weighted RRF gives +1.5% EM over equal-weight, by promoting later rounds' more targeted results
+- Round-based entity seed weight tested (weight = 0.5 × round_weight) but no improvement — PPR normalizes reset_prob, diluting the difference
 - Main remaining bottlenecks: QA model quality (22%) and retrieval ranking (28%)
-- Potential next steps: increase qa_top_k, optimize QA prompt for concise answers, or use stronger LLM
+
+---
+
+## Exp 7: Higher Expansion Damping (2026-03-11)
+- **Branch**: feature/graph-reshape
+- **Method**: Exp 6 + higher damping (0.7 vs 0.5) for seed expansion PPR
+  - Base PPR (full pipeline): damping=0.5 (unchanged)
+  - Seed expansion PPR: damping=0.7 (bridge entities spread further along graph)
+  - Rationale: higher damping = more walking along edges = bridge entity influence propagates further, less reset to start
+
+### Key Parameters
+| Parameter | Base PPR | Expansion PPR |
+|-----------|----------|---------------|
+| damping | 0.5 | **0.7** |
+| RRF round weight | 1.0 + i×0.5 | 1.0 + i×0.5 |
+| entity seed weight | — | 0.5 (fixed) |
+
+### Results
+| Metric | Baseline | Reasoning | Delta |
+|--------|----------|-----------|-------|
+| EM     | 0.4200   | 0.5150    | **+9.5%** |
+| F1     | 0.5089   | 0.6025    | **+9.37%** |
+| R@5    | 0.6692   | 0.8208    | **+15.17%** |
+
+### Statistics
+- Avg reasoning rounds: 1.80
+- R@5=1.0 queries: 128/200
+
+### Comparison with All Experiments
+| Exp | Method | EM Δ | F1 Δ | R@5 Δ |
+|-----|--------|------|------|-------|
+| 1 | Query rewrite only | +4.0% | +5.1% | +11.2% |
+| 2 | Seed expansion only | +3.0% | +2.9% | +4.2% |
+| 3 | Combined (uncommitted) | +5.5% | +5.3% | +10.6% |
+| 4 | Combined (committed) | +8.0% | +6.69% | +13.37% |
+| 5 | + Virtual entity nodes | +8.0% | +6.69% | +13.54% |
+| 6 | + Weighted RRF | +9.5% | +9.23% | +14.04% |
+| **7** | **+ Expansion damping 0.7** | **+9.5%** | **+9.37%** | **+15.17%** |
+
+### Analysis
+- **Best R@5 so far** — +15.17%, up from +14.04% in Exp 6
+- Higher damping lets bridge entities propagate further through graph, finding more relevant passages
+- EM unchanged (+9.5%) because the newly found passages hit QA bottleneck cases (docs found but QA model fails)
+- Potential next steps: increase qa_top_k, optimize QA prompt, or use stronger LLM
