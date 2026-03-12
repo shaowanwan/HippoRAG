@@ -5,7 +5,32 @@ Usage: .venv/bin/python analyze_by_hops.py
 """
 
 import json
+import re as _re
 import numpy as np
+
+
+def normalize_answer(s):
+    """Lower text and remove punctuation, articles and extra whitespace."""
+    s = s.lower().strip()
+    s = _re.sub(r'[^\w\s]', '', s)
+    s = _re.sub(r'\b(a|an|the)\b', ' ', s)
+    s = ' '.join(s.split())
+    return s
+
+
+def check_em(pred, gold_answer, gold_aliases):
+    """Check EM against gold answer and all aliases."""
+    pred_norm = normalize_answer(pred)
+    all_golds = [gold_answer] + (gold_aliases if gold_aliases else [])
+    return any(normalize_answer(g) == pred_norm for g in all_golds)
+
+
+def compute_em(results, answer_key):
+    return np.mean([
+        1 if check_em(r.get(answer_key, ""), r["gold_answer"], r.get("gold_aliases", []))
+        else 0
+        for r in results
+    ])
 
 
 def main():
@@ -43,14 +68,8 @@ def main():
         base_r5 = np.mean([r["baseline_retrieval"].get("Recall@5", 0) for r in group])
         reas_r5 = np.mean([r["reasoning_retrieval"].get("final", {}).get("Recall@5", 0) for r in group])
 
-        base_em = np.mean([
-            1 if r.get("baseline_answer", "").strip().lower() == r["gold_answer"].strip().lower() else 0
-            for r in group
-        ])
-        reas_em = np.mean([
-            1 if r.get("reasoning_answer", "").strip().lower() == r["gold_answer"].strip().lower() else 0
-            for r in group
-        ])
+        base_em = compute_em(group, "baseline_answer")
+        reas_em = compute_em(group, "reasoning_answer")
 
         avg_rounds = np.mean([
             r["reasoning_retrieval"].get("avg_rounds_used", 1) for r in group
@@ -63,14 +82,8 @@ def main():
     n = len(results)
     base_r5 = np.mean([r["baseline_retrieval"].get("Recall@5", 0) for r in results])
     reas_r5 = np.mean([r["reasoning_retrieval"].get("final", {}).get("Recall@5", 0) for r in results])
-    base_em = np.mean([
-        1 if r.get("baseline_answer", "").strip().lower() == r["gold_answer"].strip().lower() else 0
-        for r in results
-    ])
-    reas_em = np.mean([
-        1 if r.get("reasoning_answer", "").strip().lower() == r["gold_answer"].strip().lower() else 0
-        for r in results
-    ])
+    base_em = compute_em(results, "baseline_answer")
+    reas_em = compute_em(results, "reasoning_answer")
     avg_rounds = np.mean([r["reasoning_retrieval"].get("avg_rounds_used", 1) for r in results])
     print(f" All {n:4d} | {base_r5:8.3f} {reas_r5:8.3f} {reas_r5-base_r5:+8.3f} | {base_em:7.3f} {reas_em:7.3f} {reas_em-base_em:+7.3f} | {avg_rounds:10.2f}")
 

@@ -24,9 +24,15 @@ RRF_ROUND_BOOST = 0.5
 EXPANSION_DAMPING = 0.7
 
 # Edge attention mode: None, "query_conditioned", "graph_propagation"
-EDGE_ATTENTION_MODE = None
+EDGE_ATTENTION_MODE = "query_conditioned"
 # Minimum gate value to prevent completely killing edges
 EDGE_GATE_MIN = 0.1
+
+# Per-node damping: True to enable adaptive damping based on reasoning direction
+PER_NODE_DAMPING = False
+# Base damping and max adjustment range
+PER_NODE_DAMPING_BASE = 0.5
+PER_NODE_DAMPING_DELTA = 0.2  # nodes aligned with direction: damping -= delta
 
 
 class ReasoningController:
@@ -338,18 +344,18 @@ class ReasoningController:
             if direction_norm is not None:
                 dir_score = float(np.dot(direction_norm, edge_repr_norm))
                 dir_gate = 1.0 / (1.0 + math.exp(-dir_score / 0.15))  # τ=0.15
-                gate += max(0, dir_gate - 0.5) * 0.6  # only boost, max +0.3
+                gate += max(0, dir_gate - 0.5) * 1.0  # only boost, max +0.5
 
             # β: rewritten query relevance
             rel_score = float(np.dot(rewritten_norm, edge_repr_norm))
             rel_gate = 1.0 / (1.0 + math.exp(-rel_score / 0.15))
             gate += max(0, rel_gate - 0.5) * 0.4  # only boost, max +0.2
 
-            # γ: max similarity to any discovered entity (strongest signal)
+            # γ: max similarity to any discovered entity
             if discovered_emb_norms:
                 max_ent_sim = max(float(np.dot(e_norm, edge_repr_norm)) for e_norm in discovered_emb_norms)
                 ent_gate = 1.0 / (1.0 + math.exp(-max_ent_sim / 0.15))
-                gate += max(0, ent_gate - 0.5) * 0.8
+                gate += max(0, ent_gate - 0.5) * 0.4
 
             edge["weight"] = edge["weight"] * gate
 
@@ -418,6 +424,168 @@ class ReasoningController:
             node_weights[vid] = max(sim, 0.0)
 
         return node_weights
+
+    # ── Per-node damping PPR ──────────────────────────────────────────
+
+    def _compute_per_node_damping(
+        self,
+        original_query_emb: np.ndarray,
+        rewritten_query_emb: np.ndarray,
+        discovered_vids: List[int] = None,
+    ) -> np.ndarray:
+        """Compute per-node damping with tri-signal attention.
+
+        Three signals (same as edge attention):
+        1. Orthogonal direction alignment → lower damping (spread further in reasoning direction)
+        2. Rewritten query relevance → lower damping (relevant nodes propagate more)
+        3. Max discovered entity similarity → lower damping (bridge neighborhood spreads)
+
+        All signals use temperature-scaled sigmoid for sharper discrimination.
+        Damping is only LOWERED (never raised above base), so non-relevant nodes are unaffected.
+
+        Returns array of damping values per node.
+        """
+        hip = self.hipporag
+        n_nodes = len(hip.node_name_to_vertex_idx)
+        base = PER_NODE_DAMPING_BASE
+        delta = PER_NODE_DAMPING_DELTA
+        damping = np.full(n_nodes, base)
+
+        entity_embs = hip.entity_embeddings
+        entity_keys = hip.entity_node_keys
+
+        # Build vertex_id -> entity embedding index mapping
+        vid_to_emb_idx = {}
+        for emb_idx, node_key in enumerate(entity_keys):
+            vid = hip.node_name_to_vertex_idx.get(node_key)
+            if vid is not None:
+                vid_to_emb_idx[vid] = emb_idx
+
+        # Signal 1: Orthogonal direction
+        orig_norm = original_query_emb / (np.linalg.norm(original_query_emb) + 1e-12)
+        proj = np.dot(rewritten_query_emb, orig_norm) * orig_norm
+        orthogonal = rewritten_query_emb - proj
+        dir_norm_val = np.linalg.norm(orthogonal)
+        has_direction = dir_norm_val > 1e-8
+        direction_norm = orthogonal / (dir_norm_val + 1e-12) if has_direction else None
+
+        # Signal 2: Rewritten query
+        rewritten_norm = rewritten_query_emb / (np.linalg.norm(rewritten_query_emb) + 1e-12)
+
+        # Signal 3: Discovered entity embeddings
+        discovered_emb_norms = []
+        if discovered_vids:
+            for vid in discovered_vids:
+                emb_idx = vid_to_emb_idx.get(vid)
+                if emb_idx is not None:
+                    e = entity_embs[emb_idx]
+                    discovered_emb_norms.append(e / (np.linalg.norm(e) + 1e-12))
+
+        # Compute per-node damping adjustment
+        for emb_idx, node_key in enumerate(entity_keys):
+            vid = hip.node_name_to_vertex_idx.get(node_key)
+            if vid is None:
+                continue
+
+            emb_norm = entity_embs[emb_idx] / (np.linalg.norm(entity_embs[emb_idx]) + 1e-12)
+            adjustment = 0.0
+
+            # α: direction alignment
+            if direction_norm is not None:
+                dir_score = float(np.dot(direction_norm, emb_norm))
+                dir_gate = 1.0 / (1.0 + math.exp(-dir_score / 0.15))
+                adjustment += max(0, dir_gate - 0.5) * 0.4
+
+            # β: rewritten query relevance
+            rel_score = float(np.dot(rewritten_norm, emb_norm))
+            rel_gate = 1.0 / (1.0 + math.exp(-rel_score / 0.15))
+            adjustment += max(0, rel_gate - 0.5) * 0.3
+
+            # γ: max discovered entity similarity
+            if discovered_emb_norms:
+                max_sim = max(float(np.dot(e_norm, emb_norm)) for e_norm in discovered_emb_norms)
+                ent_gate = 1.0 / (1.0 + math.exp(-max_sim / 0.15))
+                adjustment += max(0, ent_gate - 0.5) * 0.5
+
+            # Lower damping = spread further. Adjustment is [0, ~0.6]
+            # Scale to damping reduction: max delta reduction
+            damping[vid] = base - delta * min(adjustment / 0.6, 1.0)
+
+        return damping
+
+    def _run_ppr_per_node_damping(
+        self,
+        reset_prob: np.ndarray,
+        damping: np.ndarray,
+        graph=None,
+        max_iter: int = 50,
+        tol: float = 1e-6,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """Run PPR with per-node damping via power iteration (sparse matrix).
+
+        Standard PPR: score = α * reset + (1-α) * M @ score
+        Per-node:     score[v] = α[v] * reset[v] + (1-α[v]) * Σ_u P(u→v) * score[u]
+
+        Returns (sorted_doc_ids, sorted_doc_scores) same as hip.run_ppr.
+        """
+        from scipy import sparse
+
+        hip = self.hipporag
+        g = graph if graph is not None else hip.graph
+        n_nodes = g.vcount()
+
+        # Normalize reset_prob
+        reset_prob = np.where(np.isnan(reset_prob) | (reset_prob < 0), 0, reset_prob)
+        total = reset_prob.sum()
+        if total > 0:
+            reset_norm = reset_prob / total
+        else:
+            reset_norm = np.ones(n_nodes) / n_nodes
+
+        # Build sparse transition matrix M where M[j,i] = w(i,j) / out_weight(i)
+        has_weight = "weight" in g.es.attributes()
+        rows, cols, vals = [], [], []
+        out_weights = np.zeros(n_nodes)
+
+        for e in g.es:
+            w = e["weight"] if has_weight else 1.0
+            s, t = e.source, e.target
+            # Undirected: both directions
+            out_weights[s] += w
+            out_weights[t] += w
+            rows.extend([t, s])
+            cols.extend([s, t])
+            vals.extend([w, w])
+
+        # Normalize by out_weights
+        for k in range(len(vals)):
+            src = cols[k]
+            if out_weights[src] > 0:
+                vals[k] /= out_weights[src]
+
+        M = sparse.csr_matrix((vals, (rows, cols)), shape=(n_nodes, n_nodes))
+
+        # Power iteration
+        scores = reset_norm.copy()
+        alpha = damping          # per-node damping array
+        one_minus_alpha = 1.0 - damping
+
+        for iteration in range(max_iter):
+            propagated = M.dot(scores)
+            new_scores = alpha * reset_norm + one_minus_alpha * propagated
+
+            diff = np.abs(new_scores - scores).sum()
+            scores = new_scores
+            if diff < tol:
+                logger.debug(f"Per-node damping PPR converged in {iteration+1} iterations")
+                break
+
+        # Extract passage scores
+        doc_scores = np.array([scores[idx] for idx in hip.passage_node_idxs])
+        sorted_doc_ids = np.argsort(doc_scores)[::-1]
+        sorted_doc_scores = doc_scores[sorted_doc_ids.tolist()]
+
+        return sorted_doc_ids, sorted_doc_scores
 
     # ── Retrieval ──────────────────────────────────────────────────────
 
@@ -514,11 +682,26 @@ class ReasoningController:
                     modified_weights = modified_weights + alpha * prop_weights
                     logger.info(f"  Applied graph propagation attention (alpha={alpha})")
 
-                boosted_doc_ids, boosted_doc_scores = hip.run_ppr(
-                    modified_weights,
-                    damping=EXPANSION_DAMPING,
-                    graph=working_graph,
-                )
+                # Run PPR: per-node damping or standard
+                if PER_NODE_DAMPING:
+                    orig_emb = hip.embedding_model.batch_encode([state.original_query], norm=True)[0]
+                    rewrite_emb = hip.embedding_model.batch_encode([state.current_query], norm=True)[0]
+                    node_damping = self._compute_per_node_damping(
+                        orig_emb, rewrite_emb,
+                        discovered_vids=list(all_discovered.values()),
+                    )
+                    boosted_doc_ids, boosted_doc_scores = self._run_ppr_per_node_damping(
+                        modified_weights,
+                        damping=node_damping,
+                        graph=working_graph,
+                    )
+                    logger.info(f"  Per-node damping PPR: damping range [{node_damping.min():.2f}, {node_damping.max():.2f}]")
+                else:
+                    boosted_doc_ids, boosted_doc_scores = hip.run_ppr(
+                        modified_weights,
+                        damping=EXPANSION_DAMPING,
+                        graph=working_graph,
+                    )
 
                 for rank, doc_id in enumerate(boosted_doc_ids):
                     rrf_scores[doc_id] += round_weight / (rrf_k + rank + 1)
@@ -527,7 +710,7 @@ class ReasoningController:
                     f"  Seed expansion PPR: {len(all_discovered)} entities, "
                     f"bridge edges: {overlay.num_temp_edges if overlay else 0}, "
                     f"round_weight: {round_weight:.1f}, "
-                    f"edge_attn: {EDGE_ATTENTION_MODE or 'none'}"
+                    f"per_node_damping: {PER_NODE_DAMPING}"
                 )
 
             # Build current result from RRF scores
