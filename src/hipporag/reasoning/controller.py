@@ -14,7 +14,7 @@ from ..evaluation.retrieval_eval import RetrievalRecall
 logger = logging.getLogger(__name__)
 
 # Default weight for discovered entity seeds
-DEFAULT_ENTITY_SEED_WEIGHT = 0.5
+DEFAULT_ENTITY_SEED_WEIGHT = 1.0
 
 # RRF round weight: later rounds contribute more
 # Round i weight = 1.0 + i * RRF_ROUND_BOOST
@@ -33,6 +33,11 @@ PER_NODE_DAMPING = False
 # Base damping and max adjustment range
 PER_NODE_DAMPING_BASE = 0.5
 PER_NODE_DAMPING_DELTA = 0.2  # nodes aligned with direction: damping -= delta
+
+# ERRWT: Edge-Reinforced Random Walk with Triggering
+ERRWT_ENABLED = True
+ERRWT_RHO = 2.0        # reinforcement strength per round
+ERRWT_DECAY = 0.5      # decay factor for previous rounds' reinforcement
 
 
 class ReasoningController:
@@ -172,7 +177,7 @@ class ReasoningController:
         overlay = GraphOverlay(self.hipporag.graph)
 
         for d_vid in discovered_vertex_ids:
-            bridge_weight = self._degree_adaptive_weight(d_vid, 1.0)
+            bridge_weight = self._degree_adaptive_weight(d_vid, 2.0)
             for s_vid in existing_seed_vertex_ids:
                 if d_vid != s_vid:
                     overlay.add_reasoning_edge(d_vid, s_vid, bridge_weight)
@@ -425,6 +430,90 @@ class ReasoningController:
 
         return node_weights
 
+    # ── ERRWT: Edge-Reinforced Random Walk with Triggering ─────────────
+
+    def _init_errwt(self, graph):
+        """Initialize ERRWT reinforcement array for a new query."""
+        self._errwt_reinforcement = np.zeros(graph.ecount())
+        self._errwt_reinforced_vids = set()  # track reinforced entity nodes
+
+    def _errwt_update_rag(self, top_doc_ids, base_node_weights,
+                          discovered_vids=None, graph=None):
+        """RAG-level ERRWT: reinforce based on retrieval results, not PPR flow.
+
+        Reward signals (all verified by the RAG pipeline):
+        1. Top-K docs → entity neighbors of retrieved passages
+        2. Seed entities → entities activated by fact matching
+        3. Discovered bridge entities → their edges
+        """
+        hip = self.hipporag
+        g = graph if graph is not None else hip.graph
+        passage_idx_set = set(hip.passage_node_idxs)
+
+        # Decay previous reinforcement
+        self._errwt_reinforcement *= ERRWT_DECAY
+
+        # Collect reward entity set
+        reward_vids = set()
+
+        # Signal 1: entity neighbors of top-K retrieved passages
+        for doc_id in top_doc_ids[:5]:
+            passage_vid = hip.passage_node_idxs[doc_id]
+            for neighbor_vid in g.neighbors(passage_vid):
+                if neighbor_vid not in passage_idx_set:
+                    reward_vids.add(neighbor_vid)
+
+        # Signal 2: seed entities from fact matching (non-zero base weights)
+        for vid in range(len(base_node_weights)):
+            if base_node_weights[vid] > 0 and vid not in passage_idx_set:
+                reward_vids.add(vid)
+
+        # Signal 3: discovered bridge entities
+        if discovered_vids:
+            for vid in discovered_vids:
+                reward_vids.add(vid)
+
+        # Reinforce all edges incident to reward entities
+        for vid in reward_vids:
+            try:
+                for eid in g.incident(vid):
+                    edge = g.es[eid]
+                    other = edge.target if edge.source == vid else edge.source
+                    # Skip passage edges
+                    if other in passage_idx_set:
+                        continue
+                    # Stronger reinforcement if both endpoints are reward entities
+                    if other in reward_vids:
+                        self._errwt_reinforcement[eid] += ERRWT_RHO
+                    else:
+                        self._errwt_reinforcement[eid] += ERRWT_RHO * 0.5
+            except Exception:
+                continue  # skip if vid out of range (overlay nodes)
+
+        self._errwt_reinforced_vids.update(reward_vids)
+        logger.info(
+            f"  ERRWT-RAG: {len(reward_vids)} reward entities, "
+            f"total reinforced vids: {len(self._errwt_reinforced_vids)}"
+        )
+
+    def _errwt_apply_weights(self, graph):
+        """Return a copy of the graph with reinforced edge weights."""
+        g = graph.copy()
+        n_edges = g.ecount()
+        reinforcement = self._errwt_reinforcement
+        # If graph was extended (bridge edges), pad reinforcement
+        if len(reinforcement) < n_edges:
+            reinforcement = np.pad(reinforcement, (0, n_edges - len(reinforcement)))
+            self._errwt_reinforcement = reinforcement
+
+        for eid in range(n_edges):
+            if reinforcement[eid] > 0:
+                g.es[eid]["weight"] = g.es[eid]["weight"] + reinforcement[eid]
+
+        n_reinforced = np.sum(reinforcement > 1e-8)
+        logger.info(f"  ERRWT: {n_reinforced} edges reinforced, max={reinforcement.max():.4f}")
+        return g
+
     # ── Per-node damping PPR ──────────────────────────────────────────
 
     def _compute_per_node_damping(
@@ -633,6 +722,10 @@ class ReasoningController:
         base_node_weights = None
         all_discovered = {}  # name -> vertex_id, accumulated across rounds
 
+        # Initialize ERRWT for this query
+        if ERRWT_ENABLED:
+            self._init_errwt(hip.graph)
+
         for round_i in range(self.max_rounds):
             state.round_idx = round_i
             round_start = time.time()
@@ -643,6 +736,15 @@ class ReasoningController:
             sorted_doc_ids, sorted_doc_scores, node_weights = self._retrieve_single_query(state.current_query)
             if node_weights is not None:
                 base_node_weights = node_weights
+
+            # ERRWT-RAG: reinforce based on retrieval results
+            if ERRWT_ENABLED and base_node_weights is not None:
+                self._errwt_update_rag(
+                    top_doc_ids=sorted_doc_ids[:5],
+                    base_node_weights=base_node_weights,
+                    discovered_vids=list(all_discovered.values()) if all_discovered else None,
+                    graph=hip.graph,
+                )
 
             # Step 2: RRF accumulate (later rounds weighted higher)
             round_weight = 1.0 + round_i * RRF_ROUND_BOOST
@@ -662,6 +764,12 @@ class ReasoningController:
                 )
 
                 working_graph = overlay.get_working_graph() if overlay else None
+
+                # Apply ERRWT reinforcement from previous rounds
+                if ERRWT_ENABLED and hasattr(self, '_errwt_reinforcement'):
+                    working_graph = self._errwt_apply_weights(
+                        working_graph if working_graph is not None else hip.graph
+                    )
 
                 # Apply edge attention if configured
                 if EDGE_ATTENTION_MODE == "query_conditioned":
@@ -710,7 +818,7 @@ class ReasoningController:
                     f"  Seed expansion PPR: {len(all_discovered)} entities, "
                     f"bridge edges: {overlay.num_temp_edges if overlay else 0}, "
                     f"round_weight: {round_weight:.1f}, "
-                    f"per_node_damping: {PER_NODE_DAMPING}"
+                    f"errwt: {ERRWT_ENABLED}"
                 )
 
             # Build current result from RRF scores
