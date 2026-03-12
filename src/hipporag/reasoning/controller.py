@@ -37,7 +37,8 @@ PER_NODE_DAMPING_DELTA = 0.2  # nodes aligned with direction: damping -= delta
 # ERRWT: Edge-Reinforced Random Walk with Triggering
 ERRWT_ENABLED = True
 ERRWT_RHO = 2.0        # reinforcement strength per round
-ERRWT_DECAY = 0.5      # decay factor for previous rounds' reinforcement
+ERRWT_DECAY = 0.8      # decay factor for previous rounds' reinforcement
+ERRWT_ATTENTION_WEIGHTED = True  # modulate reinforcement by tri-signal edge attention
 
 
 class ReasoningController:
@@ -438,13 +439,22 @@ class ReasoningController:
         self._errwt_reinforced_vids = set()  # track reinforced entity nodes
 
     def _errwt_update_rag(self, top_doc_ids, base_node_weights,
-                          discovered_vids=None, graph=None):
-        """RAG-level ERRWT: reinforce based on retrieval results, not PPR flow.
+                          discovered_vids=None, graph=None,
+                          original_query_emb=None, rewritten_query_emb=None):
+        """RAG-level ERRWT: reinforce based on retrieval results.
 
-        Reward signals (all verified by the RAG pipeline):
+        Only called from round 1+ (round 0 has no reasoning signals).
+
+        Reward signals:
         1. Top-K docs → entity neighbors of retrieved passages
         2. Seed entities → entities activated by fact matching
         3. Discovered bridge entities → their edges
+
+        Attention modulation (tri-signal, same as edge attention):
+        1. Reasoning direction (orthogonal component of rewrite vs original)
+        2. Rewritten query relevance
+        3. Max discovered entity similarity
+        Reinforcement = ρ × tri_signal_gate for each edge.
         """
         hip = self.hipporag
         g = graph if graph is not None else hip.graph
@@ -452,6 +462,37 @@ class ReasoningController:
 
         # Decay previous reinforcement
         self._errwt_reinforcement *= ERRWT_DECAY
+
+        # Precompute tri-signal attention components
+        edge_attention_cache = {}
+        if ERRWT_ATTENTION_WEIGHTED and original_query_emb is not None and rewritten_query_emb is not None:
+            entity_embs = hip.entity_embeddings
+            entity_keys = hip.entity_node_keys
+            vid_to_emb_idx = {}
+            for emb_idx, node_key in enumerate(entity_keys):
+                vid = hip.node_name_to_vertex_idx.get(node_key)
+                if vid is not None:
+                    vid_to_emb_idx[vid] = emb_idx
+
+            # Signal 1: reasoning direction (orthogonal decomposition)
+            orig_norm = original_query_emb / (np.linalg.norm(original_query_emb) + 1e-12)
+            proj = np.dot(rewritten_query_emb, orig_norm) * orig_norm
+            orthogonal = rewritten_query_emb - proj
+            dir_norm_val = np.linalg.norm(orthogonal)
+            has_direction = dir_norm_val > 1e-8
+            direction_norm = orthogonal / (dir_norm_val + 1e-12) if has_direction else None
+
+            # Signal 2: rewritten query
+            rewritten_norm = rewritten_query_emb / (np.linalg.norm(rewritten_query_emb) + 1e-12)
+
+            # Signal 3: discovered entity embeddings
+            discovered_emb_norms = []
+            if discovered_vids:
+                for vid in discovered_vids:
+                    emb_idx = vid_to_emb_idx.get(vid)
+                    if emb_idx is not None:
+                        e = entity_embs[emb_idx]
+                        discovered_emb_norms.append(e / (np.linalg.norm(e) + 1e-12))
 
         # Collect reward entity set
         reward_vids = set()
@@ -463,7 +504,7 @@ class ReasoningController:
                 if neighbor_vid not in passage_idx_set:
                     reward_vids.add(neighbor_vid)
 
-        # Signal 2: seed entities from fact matching (non-zero base weights)
+        # Signal 2: seed entities from fact matching
         for vid in range(len(base_node_weights)):
             if base_node_weights[vid] > 0 and vid not in passage_idx_set:
                 reward_vids.add(vid)
@@ -473,26 +514,64 @@ class ReasoningController:
             for vid in discovered_vids:
                 reward_vids.add(vid)
 
-        # Reinforce all edges incident to reward entities
+        # Reinforce edges incident to reward entities, modulated by tri-signal attention
         for vid in reward_vids:
             try:
                 for eid in g.incident(vid):
                     edge = g.es[eid]
                     other = edge.target if edge.source == vid else edge.source
-                    # Skip passage edges
                     if other in passage_idx_set:
                         continue
-                    # Stronger reinforcement if both endpoints are reward entities
+
+                    # Compute tri-signal attention gate for this edge
+                    rho = ERRWT_RHO
+
+                    if ERRWT_ATTENTION_WEIGHTED and original_query_emb is not None and eid not in edge_attention_cache:
+                        src_idx = vid_to_emb_idx.get(edge.source)
+                        tgt_idx = vid_to_emb_idx.get(edge.target)
+                        if src_idx is not None or tgt_idx is not None:
+                            if src_idx is not None and tgt_idx is not None:
+                                edge_repr = (entity_embs[src_idx] + entity_embs[tgt_idx]) / 2
+                            elif src_idx is not None:
+                                edge_repr = entity_embs[src_idx]
+                            else:
+                                edge_repr = entity_embs[tgt_idx]
+                            edge_repr_norm = edge_repr / (np.linalg.norm(edge_repr) + 1e-12)
+
+                            gate = 1.0
+                            # α: reasoning direction
+                            if direction_norm is not None:
+                                dir_score = float(np.dot(direction_norm, edge_repr_norm))
+                                dir_gate = 1.0 / (1.0 + math.exp(-dir_score / 0.15))
+                                gate += max(0, dir_gate - 0.5) * 1.0
+                            # β: rewritten query relevance
+                            rel_score = float(np.dot(rewritten_norm, edge_repr_norm))
+                            rel_gate = 1.0 / (1.0 + math.exp(-rel_score / 0.15))
+                            gate += max(0, rel_gate - 0.5) * 0.4
+                            # γ: max discovered entity similarity
+                            if discovered_emb_norms:
+                                max_ent_sim = max(float(np.dot(e_norm, edge_repr_norm)) for e_norm in discovered_emb_norms)
+                                ent_gate = 1.0 / (1.0 + math.exp(-max_ent_sim / 0.15))
+                                gate += max(0, ent_gate - 0.5) * 0.4
+
+                            edge_attention_cache[eid] = gate
+                        else:
+                            edge_attention_cache[eid] = 1.0
+
+                    if eid in edge_attention_cache:
+                        rho *= edge_attention_cache[eid]
+
                     if other in reward_vids:
-                        self._errwt_reinforcement[eid] += ERRWT_RHO
+                        self._errwt_reinforcement[eid] += rho
                     else:
-                        self._errwt_reinforcement[eid] += ERRWT_RHO * 0.5
+                        self._errwt_reinforcement[eid] += rho * 0.5
             except Exception:
-                continue  # skip if vid out of range (overlay nodes)
+                continue
 
         self._errwt_reinforced_vids.update(reward_vids)
         logger.info(
             f"  ERRWT-RAG: {len(reward_vids)} reward entities, "
+            f"attn_edges={len(edge_attention_cache)}, "
             f"total reinforced vids: {len(self._errwt_reinforced_vids)}"
         )
 
@@ -737,13 +816,17 @@ class ReasoningController:
             if node_weights is not None:
                 base_node_weights = node_weights
 
-            # ERRWT-RAG: reinforce based on retrieval results
-            if ERRWT_ENABLED and base_node_weights is not None:
+            # ERRWT-RAG: reinforce based on retrieval results (skip round 0 — no reasoning signals)
+            if ERRWT_ENABLED and base_node_weights is not None and round_i > 0:
+                orig_emb = hip.embedding_model.batch_encode([state.original_query], norm=True)[0]
+                rewrite_emb = hip.embedding_model.batch_encode([state.current_query], norm=True)[0]
                 self._errwt_update_rag(
                     top_doc_ids=sorted_doc_ids[:5],
                     base_node_weights=base_node_weights,
                     discovered_vids=list(all_discovered.values()) if all_discovered else None,
                     graph=hip.graph,
+                    original_query_emb=orig_emb,
+                    rewritten_query_emb=rewrite_emb,
                 )
 
             # Step 2: RRF accumulate (later rounds weighted higher)
