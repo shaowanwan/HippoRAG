@@ -23,6 +23,11 @@ RRF_ROUND_BOOST = 0.5
 # Damping for seed expansion PPR (higher = bridge entities spread further)
 EXPANSION_DAMPING = 0.7
 
+# Edge attention mode: None, "query_conditioned", "graph_propagation"
+EDGE_ATTENTION_MODE = None
+# Minimum gate value to prevent completely killing edges
+EDGE_GATE_MIN = 0.1
+
 
 class ReasoningController:
     """Orchestrates multi-round reasoning-guided retrieval.
@@ -177,6 +182,243 @@ class ReasoningController:
             return overlay
         return None
 
+    # ── PPR diagnostics ────────────────────────────────────────────────
+
+    def _compute_ppr_diagnostics(self, node_weights: np.ndarray, query: str) -> dict:
+        """Compute PPR distribution diagnostics: entropy, concentration, query-subgraph similarity."""
+        hip = self.hipporag
+        entity_idxs = hip.entity_node_idxs
+
+        # Run PPR to get full score distribution
+        ppr_scores = np.array(hip.graph.personalized_pagerank(
+            vertices=range(len(hip.node_name_to_vertex_idx)),
+            damping=0.5,
+            directed=False,
+            weights='weight',
+            reset=node_weights.tolist(),
+            implementation='prpack',
+        ))
+
+        # Entropy over entity nodes
+        entity_scores = ppr_scores[entity_idxs]
+        pos_scores = entity_scores[entity_scores > 0]
+        if len(pos_scores) > 0:
+            p = pos_scores / pos_scores.sum()
+            entropy = float(-np.sum(p * np.log(p + 1e-12)))
+        else:
+            entropy = 0.0
+
+        # Concentration: top-10 entity share
+        total = entity_scores.sum()
+        if total > 0:
+            concentration = float(np.sort(entity_scores)[-10:].sum() / total)
+        else:
+            concentration = 0.0
+
+        # Query-subgraph similarity
+        query_emb = hip.embedding_model.batch_encode([query], norm=True)[0]
+        entity_embs = hip.entity_embeddings
+
+        # Use all entities with non-zero PPR score, weighted by PPR score
+        active_mask = entity_scores > 0
+        active_idx = np.where(active_mask)[0]
+
+        if len(active_idx) > 0 and len(entity_embs) > 0:
+            active_embs = entity_embs[active_idx]
+            active_weights = entity_scores[active_idx]
+            active_weights = active_weights / active_weights.sum()
+
+            query_norm = query_emb / (np.linalg.norm(query_emb) + 1e-12)
+            emb_norms = active_embs / (np.linalg.norm(active_embs, axis=1, keepdims=True) + 1e-12)
+            sims = np.dot(emb_norms, query_norm)
+
+            # PPR-weighted avg similarity
+            avg_sim = float(np.dot(active_weights, sims))
+
+            # Coverage gap: PPR-weighted centroid vs query
+            centroid = np.average(active_embs, axis=0, weights=active_weights)
+            centroid_norm = centroid / (np.linalg.norm(centroid) + 1e-12)
+            coverage_gap = 1.0 - float(np.dot(query_norm, centroid_norm))
+        else:
+            avg_sim = 0.0
+            coverage_gap = 1.0
+
+        return {
+            "entropy": entropy,
+            "concentration": concentration,
+            "query_sim": avg_sim,
+            "coverage_gap": coverage_gap,
+        }
+
+    # ── Edge attention ────────────────────────────────────────────────
+
+    def _apply_query_conditioned_edge_attention(
+        self,
+        original_query_emb: np.ndarray,
+        rewritten_query_emb: np.ndarray,
+        discovered_entity_vids: List[int] = None,
+        graph=None,
+    ) -> 'ig.Graph':
+        """Apply tri-signal edge attention: original query + rewritten query + discovered entities.
+
+        Three signals:
+        1. Reasoning direction (rewritten - original): what's NEW to explore
+        2. Rewritten query: overall relevance to current retrieval goal
+        3. Discovered entity centroid: proximity to bridge anchors
+
+        gate = 1.0 + α * max(0, cos(direction, edge))
+                    + β * max(0, cos(rewritten, edge))
+                    + γ * max(0, cos(entity_centroid, edge))
+
+        Only boosts, never suppresses (gate >= 1.0).
+        Returns a copy of the graph with modified edge weights.
+        """
+        hip = self.hipporag
+        g = (graph if graph is not None else hip.graph).copy()
+        entity_embs = hip.entity_embeddings
+        entity_keys = hip.entity_node_keys
+
+        # Build vertex_id -> entity embedding index mapping
+        vid_to_emb_idx = {}
+        for emb_idx, node_key in enumerate(entity_keys):
+            vid = hip.node_name_to_vertex_idx.get(node_key)
+            if vid is not None:
+                vid_to_emb_idx[vid] = emb_idx
+
+        # Signal 1: Reasoning direction via orthogonal decomposition
+        # Remove the original query's component from the rewritten query,
+        # leaving only the purely "new" semantic direction
+        orig_norm = original_query_emb / (np.linalg.norm(original_query_emb) + 1e-12)
+        proj = np.dot(rewritten_query_emb, orig_norm) * orig_norm
+        orthogonal = rewritten_query_emb - proj  # component orthogonal to original query
+        dir_norm_val = np.linalg.norm(orthogonal)
+        has_direction = dir_norm_val > 1e-8
+        direction_norm = orthogonal / (dir_norm_val + 1e-12) if has_direction else None
+
+        # Signal 2: Rewritten query
+        rewritten_norm = rewritten_query_emb / (np.linalg.norm(rewritten_query_emb) + 1e-12)
+
+        # Signal 3: Discovered entity embeddings (for max-pooling similarity)
+        discovered_emb_norms = []
+        if discovered_entity_vids:
+            for vid in discovered_entity_vids:
+                emb_idx = vid_to_emb_idx.get(vid)
+                if emb_idx is not None:
+                    e = entity_embs[emb_idx]
+                    discovered_emb_norms.append(e / (np.linalg.norm(e) + 1e-12))
+
+        if not has_direction and not discovered_emb_norms:
+            # No signal to gate with
+            return g
+
+        for eid in range(g.ecount()):
+            edge = g.es[eid]
+            src, tgt = edge.source, edge.target
+
+            src_emb_idx = vid_to_emb_idx.get(src)
+            tgt_emb_idx = vid_to_emb_idx.get(tgt)
+
+            if src_emb_idx is None and tgt_emb_idx is None:
+                continue
+
+            # Compute edge representation
+            if src_emb_idx is not None and tgt_emb_idx is not None:
+                edge_repr = (entity_embs[src_emb_idx] + entity_embs[tgt_emb_idx]) / 2
+            elif src_emb_idx is not None:
+                edge_repr = entity_embs[src_emb_idx]
+            else:
+                edge_repr = entity_embs[tgt_emb_idx]
+
+            edge_repr_norm = edge_repr / (np.linalg.norm(edge_repr) + 1e-12)
+
+            gate = 1.0
+
+            # α: reasoning direction alignment (orthogonal component)
+            # Temperature-scaled sigmoid: sharpen cosine differences
+            if direction_norm is not None:
+                dir_score = float(np.dot(direction_norm, edge_repr_norm))
+                dir_gate = 1.0 / (1.0 + math.exp(-dir_score / 0.15))  # τ=0.15
+                gate += max(0, dir_gate - 0.5) * 0.6  # only boost, max +0.3
+
+            # β: rewritten query relevance
+            rel_score = float(np.dot(rewritten_norm, edge_repr_norm))
+            rel_gate = 1.0 / (1.0 + math.exp(-rel_score / 0.15))
+            gate += max(0, rel_gate - 0.5) * 0.4  # only boost, max +0.2
+
+            # γ: max similarity to any discovered entity (strongest signal)
+            if discovered_emb_norms:
+                max_ent_sim = max(float(np.dot(e_norm, edge_repr_norm)) for e_norm in discovered_emb_norms)
+                ent_gate = 1.0 / (1.0 + math.exp(-max_ent_sim / 0.15))
+                gate += max(0, ent_gate - 0.5) * 0.8
+
+            edge["weight"] = edge["weight"] * gate
+
+        return g
+
+    def _apply_graph_propagation_attention(self, query_emb: np.ndarray) -> np.ndarray:
+        """Graph embedding propagation: aggregate neighbor embeddings weighted by query attention.
+
+        For each entity node, compute a propagated embedding by attending over its neighbors.
+        Then re-compute seed weights as cos(query, propagated_emb).
+
+        Returns new node_weights array for PPR seeds.
+        """
+        hip = self.hipporag
+        entity_embs = hip.entity_embeddings
+        entity_keys = hip.entity_node_keys
+        entity_node_idxs = hip.entity_node_idxs
+        n_nodes = len(hip.node_name_to_vertex_idx)
+
+        # Build vertex_id -> entity embedding index mapping
+        vid_to_emb_idx = {}
+        for emb_idx, node_key in enumerate(entity_keys):
+            vid = hip.node_name_to_vertex_idx.get(node_key)
+            if vid is not None:
+                vid_to_emb_idx[vid] = emb_idx
+
+        query_norm = query_emb / (np.linalg.norm(query_emb) + 1e-12)
+        emb_dim = entity_embs.shape[1] if len(entity_embs) > 0 else 0
+
+        propagated_embs = {}  # vid -> propagated embedding
+
+        for vid in entity_node_idxs:
+            emb_idx = vid_to_emb_idx.get(vid)
+            if emb_idx is None:
+                continue
+
+            neighbors = hip.graph.neighbors(vid)
+            neighbor_embs = []
+            for n_vid in neighbors:
+                n_emb_idx = vid_to_emb_idx.get(n_vid)
+                if n_emb_idx is not None:
+                    neighbor_embs.append(entity_embs[n_emb_idx])
+
+            if not neighbor_embs:
+                propagated_embs[vid] = entity_embs[emb_idx]
+                continue
+
+            neighbor_embs = np.array(neighbor_embs)
+            neighbor_norms = neighbor_embs / (np.linalg.norm(neighbor_embs, axis=1, keepdims=True) + 1e-12)
+
+            # Attention weights: softmax of cos(query, neighbor)
+            attn_scores = np.dot(neighbor_norms, query_norm)
+            # Softmax with temperature
+            attn_scores = np.exp(attn_scores - attn_scores.max())
+            attn_weights = attn_scores / (attn_scores.sum() + 1e-12)
+
+            # Propagated = weighted sum of neighbor embeddings + self
+            propagated = 0.5 * entity_embs[emb_idx] + 0.5 * np.dot(attn_weights, neighbor_embs)
+            propagated_embs[vid] = propagated
+
+        # Compute new seed weights
+        node_weights = np.zeros(n_nodes)
+        for vid, prop_emb in propagated_embs.items():
+            prop_norm = prop_emb / (np.linalg.norm(prop_emb) + 1e-12)
+            sim = float(np.dot(query_norm, prop_norm))
+            node_weights[vid] = max(sim, 0.0)
+
+        return node_weights
+
     # ── Retrieval ──────────────────────────────────────────────────────
 
     def _retrieve_single_query(self, query: str) -> Tuple[np.ndarray, np.ndarray, Optional[np.ndarray]]:
@@ -252,6 +494,26 @@ class ReasoningController:
                 )
 
                 working_graph = overlay.get_working_graph() if overlay else None
+
+                # Apply edge attention if configured
+                if EDGE_ATTENTION_MODE == "query_conditioned":
+                    orig_emb = hip.embedding_model.batch_encode([state.original_query], norm=True)[0]
+                    rewrite_emb = hip.embedding_model.batch_encode([state.current_query], norm=True)[0]
+                    discovered_vids = list(all_discovered.values())
+                    working_graph = self._apply_query_conditioned_edge_attention(
+                        orig_emb, rewrite_emb,
+                        discovered_entity_vids=discovered_vids,
+                        graph=working_graph,
+                    )
+                    logger.info(f"  Applied tri-signal edge attention (dir+rewrite+entities)")
+                elif EDGE_ATTENTION_MODE == "graph_propagation":
+                    query_emb = hip.embedding_model.batch_encode([state.current_query], norm=True)[0]
+                    prop_weights = self._apply_graph_propagation_attention(query_emb)
+                    # Merge: keep original seeds + add propagation-derived seeds
+                    alpha = 0.3  # blend factor for propagation
+                    modified_weights = modified_weights + alpha * prop_weights
+                    logger.info(f"  Applied graph propagation attention (alpha={alpha})")
+
                 boosted_doc_ids, boosted_doc_scores = hip.run_ppr(
                     modified_weights,
                     damping=EXPANSION_DAMPING,
@@ -264,7 +526,8 @@ class ReasoningController:
                 logger.info(
                     f"  Seed expansion PPR: {len(all_discovered)} entities, "
                     f"bridge edges: {overlay.num_temp_edges if overlay else 0}, "
-                    f"round_weight: {round_weight:.1f}"
+                    f"round_weight: {round_weight:.1f}, "
+                    f"edge_attn: {EDGE_ATTENTION_MODE or 'none'}"
                 )
 
             # Build current result from RRF scores
@@ -273,6 +536,17 @@ class ReasoningController:
                 hip.chunk_embedding_store.get_row(hip.passage_node_keys[idx])["content"]
                 for idx in final_sorted_ids[:num_to_retrieve]
             ]
+
+            # PPR diagnostics (always against original query for cross-round comparison)
+            ppr_diag = {}
+            if base_node_weights is not None:
+                ppr_diag = self._compute_ppr_diagnostics(base_node_weights, state.original_query)
+                logger.info(
+                    f"  PPR diag: entropy={ppr_diag['entropy']:.3f}, "
+                    f"concentration={ppr_diag['concentration']:.3f}, "
+                    f"query_sim={ppr_diag['query_sim']:.3f}, "
+                    f"coverage_gap={ppr_diag['coverage_gap']:.3f}"
+                )
 
             # Evaluate
             round_metrics = {}
@@ -284,6 +558,13 @@ class ReasoningController:
                 metrics=round_metrics,
                 query_used=state.current_query,
             )
+            # Attach PPR diagnostics to the round metrics
+            if ppr_diag and state.round_metrics:
+                rm = state.round_metrics[-1]
+                rm.ppr_entropy = ppr_diag.get("entropy", 0.0)
+                rm.ppr_concentration = ppr_diag.get("concentration", 0.0)
+                rm.ppr_query_sim = ppr_diag.get("query_sim", 0.0)
+                rm.ppr_coverage_gap = ppr_diag.get("coverage_gap", 0.0)
 
             round_time = time.time() - round_start
             logger.info(
@@ -399,5 +680,19 @@ class ReasoningController:
 
         entities_per_query = [len(s.discovered_entities) for s in all_round_states]
         eval_results["avg_entities_discovered"] = round(np.mean(entities_per_query), 2)
+
+        # PPR diagnostics per query (for cross-round analysis)
+        # When running 1 query at a time, this has 1 entry
+        for state in all_round_states:
+            query_diags = []
+            for rm in state.round_metrics:
+                query_diags.append({
+                    "round": rm.round_idx,
+                    "entropy": round(rm.ppr_entropy, 4),
+                    "concentration": round(rm.ppr_concentration, 4),
+                    "query_sim": round(rm.ppr_query_sim, 4),
+                    "coverage_gap": round(rm.ppr_coverage_gap, 4),
+                })
+            eval_results["ppr_diagnostics"] = query_diags  # per-round list for this query
 
         return eval_results

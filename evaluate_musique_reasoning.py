@@ -191,7 +191,7 @@ def run_evaluation(data, sample_limit, max_rounds):
     if sample_limit and sample_limit < len(data):
         data = data[:sample_limit]
 
-    save_dir = "outputs/musique_reasoning_eval"
+    base_save_dir = "outputs/musique_reasoning_eval"
     llm_model_name = os.getenv("LLM_MODEL_NAME", "qwen-plus")
     embedding_model_name = os.getenv(
         "EMBEDDING_MODEL_NAME", "Transformers/sentence-transformers/all-MiniLM-L6-v2"
@@ -199,6 +199,16 @@ def run_evaluation(data, sample_limit, max_rounds):
     aliyun_base_url = os.getenv(
         "LLM_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"
     )
+
+    # Separate output dirs per embedding model to avoid cache conflicts
+    # Default MiniLM uses base dir for backward compatibility with existing sample dirs
+    default_emb = "Transformers/sentence-transformers/all-MiniLM-L6-v2"
+    if embedding_model_name == default_emb:
+        save_dir = base_save_dir
+    else:
+        emb_short_name = embedding_model_name.replace("/", "_")
+        save_dir = os.path.join(base_save_dir, emb_short_name)
+    os.makedirs(save_dir, exist_ok=True)
 
     api_key = os.getenv("OPENAI_API_KEY") or os.getenv("DASHSCOPE_API_KEY")
     if api_key:
