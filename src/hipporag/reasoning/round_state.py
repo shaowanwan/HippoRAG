@@ -12,11 +12,6 @@ class RoundMetrics:
     recall_at_k: Dict[str, float] = field(default_factory=dict)
     num_retrieved: int = 0
     query_used: str = ""
-    # PPR diffusion diagnostics
-    ppr_entropy: float = 0.0
-    ppr_concentration: float = 0.0
-    ppr_query_sim: float = 0.0  # avg similarity between query and top activated entities
-    ppr_coverage_gap: float = 0.0
 
 
 @dataclass

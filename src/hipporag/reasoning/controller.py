@@ -14,7 +14,7 @@ from ..evaluation.retrieval_eval import RetrievalRecall
 logger = logging.getLogger(__name__)
 
 # Default weight for discovered entity seeds
-DEFAULT_ENTITY_SEED_WEIGHT = 1.0
+DEFAULT_ENTITY_SEED_WEIGHT = 0.5
 
 # RRF round weight: later rounds contribute more
 # Round i weight = 1.0 + i * RRF_ROUND_BOOST
@@ -23,22 +23,17 @@ RRF_ROUND_BOOST = 0.5
 # Damping for seed expansion PPR (higher = bridge entities spread further)
 EXPANSION_DAMPING = 0.7
 
-# Edge attention mode: None, "query_conditioned", "graph_propagation"
-EDGE_ATTENTION_MODE = "query_conditioned"
-# Minimum gate value to prevent completely killing edges
-EDGE_GATE_MIN = 0.1
+# LP boost: multiply bridge edge weight when LLM predicted the link
+LP_BOOST = 1.5
 
-# Per-node damping: True to enable adaptive damping based on reasoning direction
-PER_NODE_DAMPING = False
-# Base damping and max adjustment range
-PER_NODE_DAMPING_BASE = 0.5
-PER_NODE_DAMPING_DELTA = 0.2  # nodes aligned with direction: damping -= delta
+# Mini-PPR threshold: only build bridge edge if PPR score > this (covers ~6 hops)
+PPR_FILTER_THRESHOLD = 0.000001
 
-# ERRWT: Edge-Reinforced Random Walk with Triggering
-ERRWT_ENABLED = True
-ERRWT_RHO = 2.0        # reinforcement strength per round
-ERRWT_DECAY = 0.8      # decay factor for previous rounds' reinforcement
-ERRWT_ATTENTION_WEIGHTED = True  # modulate reinforcement by tri-signal edge attention
+# RRF weight: scale factor for pipeline RRF relative to PPR (PPR is primary)
+RRF_WEIGHT = 0.1
+
+
+
 
 
 class ReasoningController:
@@ -166,594 +161,222 @@ class ReasoningController:
         deg = self.hipporag.graph.degree(vid)
         return base_weight * (1.0 + math.log(deg + 1))
 
-    def _build_overlay(
-        self,
-        discovered_vertex_ids: List[int],
-        existing_seed_vertex_ids: List[int],
-    ) -> Optional[GraphOverlay]:
-        """Build GraphOverlay with bridge edges between discovered and existing seed entities."""
-        if not discovered_vertex_ids:
+    def _build_reverse_index(self):
+        """Build vertex_id -> entity_key reverse index (cached)."""
+        if not hasattr(self, '_vid_to_key'):
+            self._vid_to_key = {}
+            self._key_to_emb_idx = {}
+            hip = self.hipporag
+            for key, idx in hip.node_name_to_vertex_idx.items():
+                self._vid_to_key[idx] = key
+            for i, key in enumerate(hip.entity_node_keys):
+                self._key_to_emb_idx[key] = i
+
+    def _vertex_display_name(self, vid: int) -> str:
+        """Get human-readable name for a vertex ID."""
+        self._build_reverse_index()
+        key = self._vid_to_key.get(vid)
+        if key is None:
+            return f"entity_{vid}"
+        return self.hipporag.entity_embedding_store.hash_id_to_text.get(key, key)
+
+    def _get_entity_embedding(self, vid: int) -> Optional[np.ndarray]:
+        """Get the embedding for an entity vertex."""
+        self._build_reverse_index()
+        key = self._vid_to_key.get(vid)
+        if key is None:
             return None
+        emb_idx = self._key_to_emb_idx.get(key)
+        if emb_idx is None:
+            return None
+        return self.hipporag.entity_embeddings[emb_idx]
 
-        overlay = GraphOverlay(self.hipporag.graph)
-
-        for d_vid in discovered_vertex_ids:
-            bridge_weight = self._degree_adaptive_weight(d_vid, 2.0)
-            for s_vid in existing_seed_vertex_ids:
-                if d_vid != s_vid:
-                    overlay.add_reasoning_edge(d_vid, s_vid, bridge_weight)
-
-        for i, d1 in enumerate(discovered_vertex_ids):
-            for d2 in discovered_vertex_ids[i+1:]:
-                w = max(self._degree_adaptive_weight(d1, 1.0),
-                        self._degree_adaptive_weight(d2, 1.0))
-                overlay.add_reasoning_edge(d1, d2, w)
-
-        if overlay.num_temp_edges > 0:
-            logger.info(f"  GraphOverlay: {overlay.summary()}")
-            return overlay
-        return None
-
-    # ── PPR diagnostics ────────────────────────────────────────────────
-
-    def _compute_ppr_diagnostics(self, node_weights: np.ndarray, query: str) -> dict:
-        """Compute PPR distribution diagnostics: entropy, concentration, query-subgraph similarity."""
+    def _get_doc_facts(self, doc_content: str) -> List[Tuple[str, str]]:
+        """Get entity pairs from a document's knowledge graph triples."""
         hip = self.hipporag
-        entity_idxs = hip.entity_node_idxs
+        doc_key = compute_mdhash_id(content=doc_content, prefix="passage-")
+        doc_vid = hip.node_name_to_vertex_idx.get(doc_key)
+        if doc_vid is None:
+            return []
 
-        # Run PPR to get full score distribution
-        ppr_scores = np.array(hip.graph.personalized_pagerank(
-            vertices=range(len(hip.node_name_to_vertex_idx)),
-            damping=0.5,
-            directed=False,
-            weights='weight',
-            reset=node_weights.tolist(),
-            implementation='prpack',
-        ))
+        pairs = []
+        neighbors = list(hip.graph.neighbors(doc_vid))
+        entity_neighbors = []
+        passage_idx_set = set(hip.passage_node_idxs)
+        for n in neighbors:
+            if n not in passage_idx_set:
+                entity_neighbors.append(n)
 
-        # Entropy over entity nodes
-        entity_scores = ppr_scores[entity_idxs]
-        pos_scores = entity_scores[entity_scores > 0]
-        if len(pos_scores) > 0:
-            p = pos_scores / pos_scores.sum()
-            entropy = float(-np.sum(p * np.log(p + 1e-12)))
-        else:
-            entropy = 0.0
+        # Find pairs of entities that are connected in the graph
+        for i, e1 in enumerate(entity_neighbors):
+            for e2 in entity_neighbors[i+1:]:
+                if hip.graph.has_edge(e1, e2):
+                    name1 = self._vertex_display_name(e1)
+                    name2 = self._vertex_display_name(e2)
+                    pairs.append((name1, name2))
+                    if len(pairs) >= 10:
+                        return pairs
+        return pairs
 
-        # Concentration: top-10 entity share
-        total = entity_scores.sum()
-        if total > 0:
-            concentration = float(np.sort(entity_scores)[-10:].sum() / total)
-        else:
-            concentration = 0.0
-
-        # Query-subgraph similarity
-        query_emb = hip.embedding_model.batch_encode([query], norm=True)[0]
-        entity_embs = hip.entity_embeddings
-
-        # Use all entities with non-zero PPR score, weighted by PPR score
-        active_mask = entity_scores > 0
-        active_idx = np.where(active_mask)[0]
-
-        if len(active_idx) > 0 and len(entity_embs) > 0:
-            active_embs = entity_embs[active_idx]
-            active_weights = entity_scores[active_idx]
-            active_weights = active_weights / active_weights.sum()
-
-            query_norm = query_emb / (np.linalg.norm(query_emb) + 1e-12)
-            emb_norms = active_embs / (np.linalg.norm(active_embs, axis=1, keepdims=True) + 1e-12)
-            sims = np.dot(emb_norms, query_norm)
-
-            # PPR-weighted avg similarity
-            avg_sim = float(np.dot(active_weights, sims))
-
-            # Coverage gap: PPR-weighted centroid vs query
-            centroid = np.average(active_embs, axis=0, weights=active_weights)
-            centroid_norm = centroid / (np.linalg.norm(centroid) + 1e-12)
-            coverage_gap = 1.0 - float(np.dot(query_norm, centroid_norm))
-        else:
-            avg_sim = 0.0
-            coverage_gap = 1.0
-
-        return {
-            "entropy": entropy,
-            "concentration": concentration,
-            "query_sim": avg_sim,
-            "coverage_gap": coverage_gap,
-        }
-
-    # ── Edge attention ────────────────────────────────────────────────
-
-    def _apply_query_conditioned_edge_attention(
+    def _find_important_edges(
         self,
-        original_query_emb: np.ndarray,
-        rewritten_query_emb: np.ndarray,
-        discovered_entity_vids: List[int] = None,
-        graph=None,
-    ) -> 'ig.Graph':
-        """Apply tri-signal edge attention: original query + rewritten query + discovered entities.
+        discovered_vertex_ids: Dict[str, int],
+        existing_seed_vertex_ids: List[int],
+    ) -> List[Tuple[int, int, float]]:
+        """Find important existing edges by diffusing from bridge entities in local subgraph.
 
-        Three signals:
-        1. Reasoning direction (rewritten - original): what's NEW to explore
-        2. Rewritten query: overall relevance to current retrieval goal
-        3. Discovered entity centroid: proximity to bridge anchors
-
-        gate = 1.0 + α * max(0, cos(direction, edge))
-                    + β * max(0, cos(rewritten, edge))
-                    + γ * max(0, cos(entity_centroid, edge))
-
-        Only boosts, never suppresses (gate >= 1.0).
-        Returns a copy of the graph with modified edge weights.
+        1. Collect bridge + seed entities and their k-hop neighbors → subgraph
+        2. Run PPR from bridge entities on subgraph
+        3. Edges with high flow (both endpoints have high PPR) are important
+        Returns list of (src_vid, dst_vid, importance_score) in the original graph.
         """
         hip = self.hipporag
-        g = (graph if graph is not None else hip.graph).copy()
-        entity_embs = hip.entity_embeddings
-        entity_keys = hip.entity_node_keys
-
-        # Build vertex_id -> entity embedding index mapping
-        vid_to_emb_idx = {}
-        for emb_idx, node_key in enumerate(entity_keys):
-            vid = hip.node_name_to_vertex_idx.get(node_key)
-            if vid is not None:
-                vid_to_emb_idx[vid] = emb_idx
-
-        # Signal 1: Reasoning direction via orthogonal decomposition
-        # Remove the original query's component from the rewritten query,
-        # leaving only the purely "new" semantic direction
-        orig_norm = original_query_emb / (np.linalg.norm(original_query_emb) + 1e-12)
-        proj = np.dot(rewritten_query_emb, orig_norm) * orig_norm
-        orthogonal = rewritten_query_emb - proj  # component orthogonal to original query
-        dir_norm_val = np.linalg.norm(orthogonal)
-        has_direction = dir_norm_val > 1e-8
-        direction_norm = orthogonal / (dir_norm_val + 1e-12) if has_direction else None
-
-        # Signal 2: Rewritten query
-        rewritten_norm = rewritten_query_emb / (np.linalg.norm(rewritten_query_emb) + 1e-12)
-
-        # Signal 3: Discovered entity embeddings (for max-pooling similarity)
-        discovered_emb_norms = []
-        if discovered_entity_vids:
-            for vid in discovered_entity_vids:
-                emb_idx = vid_to_emb_idx.get(vid)
-                if emb_idx is not None:
-                    e = entity_embs[emb_idx]
-                    discovered_emb_norms.append(e / (np.linalg.norm(e) + 1e-12))
-
-        if not has_direction and not discovered_emb_norms:
-            # No signal to gate with
-            return g
-
-        for eid in range(g.ecount()):
-            edge = g.es[eid]
-            src, tgt = edge.source, edge.target
-
-            src_emb_idx = vid_to_emb_idx.get(src)
-            tgt_emb_idx = vid_to_emb_idx.get(tgt)
-
-            if src_emb_idx is None and tgt_emb_idx is None:
-                continue
-
-            # Compute edge representation
-            if src_emb_idx is not None and tgt_emb_idx is not None:
-                edge_repr = (entity_embs[src_emb_idx] + entity_embs[tgt_emb_idx]) / 2
-            elif src_emb_idx is not None:
-                edge_repr = entity_embs[src_emb_idx]
-            else:
-                edge_repr = entity_embs[tgt_emb_idx]
-
-            edge_repr_norm = edge_repr / (np.linalg.norm(edge_repr) + 1e-12)
-
-            gate = 1.0
-
-            # α: reasoning direction alignment (orthogonal component)
-            # Temperature-scaled sigmoid: sharpen cosine differences
-            if direction_norm is not None:
-                dir_score = float(np.dot(direction_norm, edge_repr_norm))
-                dir_gate = 1.0 / (1.0 + math.exp(-dir_score / 0.15))  # τ=0.15
-                gate += max(0, dir_gate - 0.5) * 1.0  # only boost, max +0.5
-
-            # β: rewritten query relevance
-            rel_score = float(np.dot(rewritten_norm, edge_repr_norm))
-            rel_gate = 1.0 / (1.0 + math.exp(-rel_score / 0.15))
-            gate += max(0, rel_gate - 0.5) * 0.4  # only boost, max +0.2
-
-            # γ: max similarity to any discovered entity
-            if discovered_emb_norms:
-                max_ent_sim = max(float(np.dot(e_norm, edge_repr_norm)) for e_norm in discovered_emb_norms)
-                ent_gate = 1.0 / (1.0 + math.exp(-max_ent_sim / 0.15))
-                gate += max(0, ent_gate - 0.5) * 0.4
-
-            edge["weight"] = edge["weight"] * gate
-
-        return g
-
-    def _apply_graph_propagation_attention(self, query_emb: np.ndarray) -> np.ndarray:
-        """Graph embedding propagation: aggregate neighbor embeddings weighted by query attention.
-
-        For each entity node, compute a propagated embedding by attending over its neighbors.
-        Then re-compute seed weights as cos(query, propagated_emb).
-
-        Returns new node_weights array for PPR seeds.
-        """
-        hip = self.hipporag
-        entity_embs = hip.entity_embeddings
-        entity_keys = hip.entity_node_keys
-        entity_node_idxs = hip.entity_node_idxs
-        n_nodes = len(hip.node_name_to_vertex_idx)
-
-        # Build vertex_id -> entity embedding index mapping
-        vid_to_emb_idx = {}
-        for emb_idx, node_key in enumerate(entity_keys):
-            vid = hip.node_name_to_vertex_idx.get(node_key)
-            if vid is not None:
-                vid_to_emb_idx[vid] = emb_idx
-
-        query_norm = query_emb / (np.linalg.norm(query_emb) + 1e-12)
-        emb_dim = entity_embs.shape[1] if len(entity_embs) > 0 else 0
-
-        propagated_embs = {}  # vid -> propagated embedding
-
-        for vid in entity_node_idxs:
-            emb_idx = vid_to_emb_idx.get(vid)
-            if emb_idx is None:
-                continue
-
-            neighbors = hip.graph.neighbors(vid)
-            neighbor_embs = []
-            for n_vid in neighbors:
-                n_emb_idx = vid_to_emb_idx.get(n_vid)
-                if n_emb_idx is not None:
-                    neighbor_embs.append(entity_embs[n_emb_idx])
-
-            if not neighbor_embs:
-                propagated_embs[vid] = entity_embs[emb_idx]
-                continue
-
-            neighbor_embs = np.array(neighbor_embs)
-            neighbor_norms = neighbor_embs / (np.linalg.norm(neighbor_embs, axis=1, keepdims=True) + 1e-12)
-
-            # Attention weights: softmax of cos(query, neighbor)
-            attn_scores = np.dot(neighbor_norms, query_norm)
-            # Softmax with temperature
-            attn_scores = np.exp(attn_scores - attn_scores.max())
-            attn_weights = attn_scores / (attn_scores.sum() + 1e-12)
-
-            # Propagated = weighted sum of neighbor embeddings + self
-            propagated = 0.5 * entity_embs[emb_idx] + 0.5 * np.dot(attn_weights, neighbor_embs)
-            propagated_embs[vid] = propagated
-
-        # Compute new seed weights
-        node_weights = np.zeros(n_nodes)
-        for vid, prop_emb in propagated_embs.items():
-            prop_norm = prop_emb / (np.linalg.norm(prop_emb) + 1e-12)
-            sim = float(np.dot(query_norm, prop_norm))
-            node_weights[vid] = max(sim, 0.0)
-
-        return node_weights
-
-    # ── ERRWT: Edge-Reinforced Random Walk with Triggering ─────────────
-
-    def _init_errwt(self, graph):
-        """Initialize ERRWT reinforcement array for a new query."""
-        self._errwt_reinforcement = np.zeros(graph.ecount())
-        self._errwt_reinforced_vids = set()  # track reinforced entity nodes
-
-    def _errwt_update_rag(self, top_doc_ids, base_node_weights,
-                          discovered_vids=None, graph=None,
-                          original_query_emb=None, rewritten_query_emb=None):
-        """RAG-level ERRWT: reinforce based on retrieval results.
-
-        Only called from round 1+ (round 0 has no reasoning signals).
-
-        Reward signals:
-        1. Top-K docs → entity neighbors of retrieved passages
-        2. Seed entities → entities activated by fact matching
-        3. Discovered bridge entities → their edges
-
-        Attention modulation (tri-signal, same as edge attention):
-        1. Reasoning direction (orthogonal component of rewrite vs original)
-        2. Rewritten query relevance
-        3. Max discovered entity similarity
-        Reinforcement = ρ × tri_signal_gate for each edge.
-        """
-        hip = self.hipporag
-        g = graph if graph is not None else hip.graph
+        graph = hip.graph
         passage_idx_set = set(hip.passage_node_idxs)
 
-        # Decay previous reinforcement
-        self._errwt_reinforcement *= ERRWT_DECAY
+        # Step 1: Collect subgraph nodes — bridge + seed + their 2-hop entity neighbors
+        core_vids = set(discovered_vertex_ids.values()) | set(existing_seed_vertex_ids)
+        subgraph_vids = set(core_vids)
 
-        # Precompute tri-signal attention components
-        edge_attention_cache = {}
-        if ERRWT_ATTENTION_WEIGHTED and original_query_emb is not None and rewritten_query_emb is not None:
-            entity_embs = hip.entity_embeddings
-            entity_keys = hip.entity_node_keys
-            vid_to_emb_idx = {}
-            for emb_idx, node_key in enumerate(entity_keys):
-                vid = hip.node_name_to_vertex_idx.get(node_key)
-                if vid is not None:
-                    vid_to_emb_idx[vid] = emb_idx
+        for hop in range(2):
+            frontier = set()
+            for vid in subgraph_vids:
+                for n in graph.neighbors(vid):
+                    if n not in passage_idx_set:  # only entity nodes
+                        frontier.add(n)
+            subgraph_vids |= frontier
 
-            # Signal 1: reasoning direction (orthogonal decomposition)
-            orig_norm = original_query_emb / (np.linalg.norm(original_query_emb) + 1e-12)
-            proj = np.dot(rewritten_query_emb, orig_norm) * orig_norm
-            orthogonal = rewritten_query_emb - proj
-            dir_norm_val = np.linalg.norm(orthogonal)
-            has_direction = dir_norm_val > 1e-8
-            direction_norm = orthogonal / (dir_norm_val + 1e-12) if has_direction else None
+        subgraph_vids = sorted(subgraph_vids)
+        if len(subgraph_vids) < 2:
+            return []
 
-            # Signal 2: rewritten query
-            rewritten_norm = rewritten_query_emb / (np.linalg.norm(rewritten_query_emb) + 1e-12)
+        # Build local subgraph
+        sub = graph.subgraph(subgraph_vids)
+        # Map original vid -> subgraph index
+        vid_to_sub = {vid: i for i, vid in enumerate(subgraph_vids)}
+        sub_to_vid = {i: vid for vid, i in vid_to_sub.items()}
 
-            # Signal 3: discovered entity embeddings
-            discovered_emb_norms = []
-            if discovered_vids:
-                for vid in discovered_vids:
-                    emb_idx = vid_to_emb_idx.get(vid)
-                    if emb_idx is not None:
-                        e = entity_embs[emb_idx]
-                        discovered_emb_norms.append(e / (np.linalg.norm(e) + 1e-12))
+        # Step 2: PPR from bridge entities on subgraph
+        n_sub = len(subgraph_vids)
+        reset = np.zeros(n_sub)
+        for d_vid in discovered_vertex_ids.values():
+            if d_vid in vid_to_sub:
+                reset[vid_to_sub[d_vid]] = 1.0
+        if reset.sum() == 0:
+            return []
+        reset /= reset.sum()
 
-        # Collect reward entity set
-        reward_vids = set()
+        ppr_scores = sub.personalized_pagerank(
+            vertices=range(n_sub),
+            damping=EXPANSION_DAMPING,
+            directed=False,
+            weights='weight' if 'weight' in sub.es.attributes() else None,
+            reset=reset,
+            implementation='prpack',
+        )
+        ppr_scores = np.array(ppr_scores)
 
-        # Signal 1: entity neighbors of top-K retrieved passages
-        for doc_id in top_doc_ids[:5]:
-            passage_vid = hip.passage_node_idxs[doc_id]
-            for neighbor_vid in g.neighbors(passage_vid):
-                if neighbor_vid not in passage_idx_set:
-                    reward_vids.add(neighbor_vid)
-
-        # Signal 2: seed entities from fact matching
-        for vid in range(len(base_node_weights)):
-            if base_node_weights[vid] > 0 and vid not in passage_idx_set:
-                reward_vids.add(vid)
-
-        # Signal 3: discovered bridge entities
-        if discovered_vids:
-            for vid in discovered_vids:
-                reward_vids.add(vid)
-
-        # Reinforce edges incident to reward entities, modulated by tri-signal attention
-        for vid in reward_vids:
-            try:
-                for eid in g.incident(vid):
-                    edge = g.es[eid]
-                    other = edge.target if edge.source == vid else edge.source
-                    if other in passage_idx_set:
-                        continue
-
-                    # Compute tri-signal attention gate for this edge
-                    rho = ERRWT_RHO
-
-                    if ERRWT_ATTENTION_WEIGHTED and original_query_emb is not None and eid not in edge_attention_cache:
-                        src_idx = vid_to_emb_idx.get(edge.source)
-                        tgt_idx = vid_to_emb_idx.get(edge.target)
-                        if src_idx is not None or tgt_idx is not None:
-                            if src_idx is not None and tgt_idx is not None:
-                                edge_repr = (entity_embs[src_idx] + entity_embs[tgt_idx]) / 2
-                            elif src_idx is not None:
-                                edge_repr = entity_embs[src_idx]
-                            else:
-                                edge_repr = entity_embs[tgt_idx]
-                            edge_repr_norm = edge_repr / (np.linalg.norm(edge_repr) + 1e-12)
-
-                            gate = 1.0
-                            # α: reasoning direction
-                            if direction_norm is not None:
-                                dir_score = float(np.dot(direction_norm, edge_repr_norm))
-                                dir_gate = 1.0 / (1.0 + math.exp(-dir_score / 0.15))
-                                gate += max(0, dir_gate - 0.5) * 1.0
-                            # β: rewritten query relevance
-                            rel_score = float(np.dot(rewritten_norm, edge_repr_norm))
-                            rel_gate = 1.0 / (1.0 + math.exp(-rel_score / 0.15))
-                            gate += max(0, rel_gate - 0.5) * 0.4
-                            # γ: max discovered entity similarity
-                            if discovered_emb_norms:
-                                max_ent_sim = max(float(np.dot(e_norm, edge_repr_norm)) for e_norm in discovered_emb_norms)
-                                ent_gate = 1.0 / (1.0 + math.exp(-max_ent_sim / 0.15))
-                                gate += max(0, ent_gate - 0.5) * 0.4
-
-                            edge_attention_cache[eid] = gate
-                        else:
-                            edge_attention_cache[eid] = 1.0
-
-                    if eid in edge_attention_cache:
-                        rho *= edge_attention_cache[eid]
-
-                    if other in reward_vids:
-                        self._errwt_reinforcement[eid] += rho
-                    else:
-                        self._errwt_reinforcement[eid] += rho * 0.5
-            except Exception:
+        # Step 3: Score each edge by flow = min(ppr[src], ppr[dst])
+        # (both endpoints must have high probability for the edge to be important)
+        seen_pairs = set()
+        important_edges = []
+        for edge in sub.es:
+            src_sub, dst_sub = edge.source, edge.target
+            src_vid = sub_to_vid[src_sub]
+            dst_vid = sub_to_vid[dst_sub]
+            pair = (min(src_vid, dst_vid), max(src_vid, dst_vid))
+            if pair in seen_pairs:
                 continue
+            seen_pairs.add(pair)
+            flow = min(ppr_scores[src_sub], ppr_scores[dst_sub])
+            if flow > 1e-5:
+                important_edges.append((src_vid, dst_vid, flow))
 
-        self._errwt_reinforced_vids.update(reward_vids)
-        logger.info(
-            f"  ERRWT-RAG: {len(reward_vids)} reward entities, "
-            f"attn_edges={len(edge_attention_cache)}, "
-            f"total reinforced vids: {len(self._errwt_reinforced_vids)}"
+        important_edges.sort(key=lambda x: x[2], reverse=True)
+
+        # Log
+        top_edges_log = []
+        for src, dst, flow in important_edges[:10]:
+            src_name = self._vertex_display_name(src)
+            dst_name = self._vertex_display_name(dst)
+            top_edges_log.append(f"({src_name} -- {dst_name}: {flow:.6f})")
+        logger.info(f"  Important edges (top 10): {', '.join(top_edges_log)}")
+
+        return important_edges
+
+    def _mini_ppr_select_seeds(
+        self,
+        discovered_vertex_ids: Dict[str, int],
+        existing_seed_vertex_ids: List[int],
+    ) -> List[Tuple[int, int, float]]:
+        """Run mini-PPR from all bridge entities together on local subgraph.
+
+        Uses subgraph (bridge + seeds + 3-hop neighbors) instead of full graph for speed.
+        All bridge entities as seeds in one PPR run. Select seed connections by threshold.
+
+        Returns list of (bridge_vid, seed_vid, ppr_score) for selected connections.
+        """
+        hip = self.hipporag
+        graph = hip.graph
+        passage_idx_set = set(hip.passage_node_idxs)
+
+        # Build subgraph: bridge entities + seeds + 3-hop entity neighbors
+        core_vids = set(discovered_vertex_ids.values()) | set(existing_seed_vertex_ids)
+        subgraph_vids = set(core_vids)
+        for hop in range(3):
+            frontier = set()
+            for vid in subgraph_vids:
+                for n in graph.neighbors(vid):
+                    if n not in passage_idx_set:
+                        frontier.add(n)
+            subgraph_vids |= frontier
+
+        subgraph_vids = sorted(subgraph_vids)
+        if len(subgraph_vids) < 2:
+            return []
+
+        sub = graph.subgraph(subgraph_vids)
+        vid_to_sub = {vid: i for i, vid in enumerate(subgraph_vids)}
+        n_sub = len(subgraph_vids)
+
+        # All bridge entities together as seeds
+        reset = np.zeros(n_sub)
+        for d_vid in discovered_vertex_ids.values():
+            if d_vid in vid_to_sub:
+                reset[vid_to_sub[d_vid]] = 1.0
+        if reset.sum() == 0:
+            return []
+        reset /= reset.sum()
+
+        ppr_scores = sub.personalized_pagerank(
+            vertices=range(n_sub),
+            damping=EXPANSION_DAMPING,
+            directed=False,
+            weights='weight' if 'weight' in sub.es.attributes() else None,
+            reset=reset,
+            implementation='prpack',
         )
 
-    def _errwt_apply_weights(self, graph):
-        """Return a copy of the graph with reinforced edge weights."""
-        g = graph.copy()
-        n_edges = g.ecount()
-        reinforcement = self._errwt_reinforcement
-        # If graph was extended (bridge edges), pad reinforcement
-        if len(reinforcement) < n_edges:
-            reinforcement = np.pad(reinforcement, (0, n_edges - len(reinforcement)))
-            self._errwt_reinforcement = reinforcement
+        # Collect seed scores above threshold
+        selected = []
+        bridge_vids = set(discovered_vertex_ids.values())
+        seed_scores = []
+        for s_vid in existing_seed_vertex_ids:
+            if s_vid not in bridge_vids and s_vid in vid_to_sub:
+                score = ppr_scores[vid_to_sub[s_vid]]
+                seed_scores.append((s_vid, score))
+        seed_scores.sort(key=lambda x: x[1], reverse=True)
 
-        for eid in range(n_edges):
-            if reinforcement[eid] > 0:
-                g.es[eid]["weight"] = g.es[eid]["weight"] + reinforcement[eid]
+        log_items = [(self._vertex_display_name(sv), f"{sc:.6f}") for sv, sc in seed_scores[:8]]
+        logger.info(f"  Mini-PPR(subgraph, joint) -> seeds: {log_items}")
 
-        n_reinforced = np.sum(reinforcement > 1e-8)
-        logger.info(f"  ERRWT: {n_reinforced} edges reinforced, max={reinforcement.max():.4f}")
-        return g
+        # Connect all seeds with non-zero score to all bridge entities
+        for s_vid, score in seed_scores:
+            if score > 0:
+                for d_vid in bridge_vids:
+                    selected.append((d_vid, s_vid, score))
 
-    # ── Per-node damping PPR ──────────────────────────────────────────
-
-    def _compute_per_node_damping(
-        self,
-        original_query_emb: np.ndarray,
-        rewritten_query_emb: np.ndarray,
-        discovered_vids: List[int] = None,
-    ) -> np.ndarray:
-        """Compute per-node damping with tri-signal attention.
-
-        Three signals (same as edge attention):
-        1. Orthogonal direction alignment → lower damping (spread further in reasoning direction)
-        2. Rewritten query relevance → lower damping (relevant nodes propagate more)
-        3. Max discovered entity similarity → lower damping (bridge neighborhood spreads)
-
-        All signals use temperature-scaled sigmoid for sharper discrimination.
-        Damping is only LOWERED (never raised above base), so non-relevant nodes are unaffected.
-
-        Returns array of damping values per node.
-        """
-        hip = self.hipporag
-        n_nodes = len(hip.node_name_to_vertex_idx)
-        base = PER_NODE_DAMPING_BASE
-        delta = PER_NODE_DAMPING_DELTA
-        damping = np.full(n_nodes, base)
-
-        entity_embs = hip.entity_embeddings
-        entity_keys = hip.entity_node_keys
-
-        # Build vertex_id -> entity embedding index mapping
-        vid_to_emb_idx = {}
-        for emb_idx, node_key in enumerate(entity_keys):
-            vid = hip.node_name_to_vertex_idx.get(node_key)
-            if vid is not None:
-                vid_to_emb_idx[vid] = emb_idx
-
-        # Signal 1: Orthogonal direction
-        orig_norm = original_query_emb / (np.linalg.norm(original_query_emb) + 1e-12)
-        proj = np.dot(rewritten_query_emb, orig_norm) * orig_norm
-        orthogonal = rewritten_query_emb - proj
-        dir_norm_val = np.linalg.norm(orthogonal)
-        has_direction = dir_norm_val > 1e-8
-        direction_norm = orthogonal / (dir_norm_val + 1e-12) if has_direction else None
-
-        # Signal 2: Rewritten query
-        rewritten_norm = rewritten_query_emb / (np.linalg.norm(rewritten_query_emb) + 1e-12)
-
-        # Signal 3: Discovered entity embeddings
-        discovered_emb_norms = []
-        if discovered_vids:
-            for vid in discovered_vids:
-                emb_idx = vid_to_emb_idx.get(vid)
-                if emb_idx is not None:
-                    e = entity_embs[emb_idx]
-                    discovered_emb_norms.append(e / (np.linalg.norm(e) + 1e-12))
-
-        # Compute per-node damping adjustment
-        for emb_idx, node_key in enumerate(entity_keys):
-            vid = hip.node_name_to_vertex_idx.get(node_key)
-            if vid is None:
-                continue
-
-            emb_norm = entity_embs[emb_idx] / (np.linalg.norm(entity_embs[emb_idx]) + 1e-12)
-            adjustment = 0.0
-
-            # α: direction alignment
-            if direction_norm is not None:
-                dir_score = float(np.dot(direction_norm, emb_norm))
-                dir_gate = 1.0 / (1.0 + math.exp(-dir_score / 0.15))
-                adjustment += max(0, dir_gate - 0.5) * 0.4
-
-            # β: rewritten query relevance
-            rel_score = float(np.dot(rewritten_norm, emb_norm))
-            rel_gate = 1.0 / (1.0 + math.exp(-rel_score / 0.15))
-            adjustment += max(0, rel_gate - 0.5) * 0.3
-
-            # γ: max discovered entity similarity
-            if discovered_emb_norms:
-                max_sim = max(float(np.dot(e_norm, emb_norm)) for e_norm in discovered_emb_norms)
-                ent_gate = 1.0 / (1.0 + math.exp(-max_sim / 0.15))
-                adjustment += max(0, ent_gate - 0.5) * 0.5
-
-            # Lower damping = spread further. Adjustment is [0, ~0.6]
-            # Scale to damping reduction: max delta reduction
-            damping[vid] = base - delta * min(adjustment / 0.6, 1.0)
-
-        return damping
-
-    def _run_ppr_per_node_damping(
-        self,
-        reset_prob: np.ndarray,
-        damping: np.ndarray,
-        graph=None,
-        max_iter: int = 50,
-        tol: float = 1e-6,
-    ) -> Tuple[np.ndarray, np.ndarray]:
-        """Run PPR with per-node damping via power iteration (sparse matrix).
-
-        Standard PPR: score = α * reset + (1-α) * M @ score
-        Per-node:     score[v] = α[v] * reset[v] + (1-α[v]) * Σ_u P(u→v) * score[u]
-
-        Returns (sorted_doc_ids, sorted_doc_scores) same as hip.run_ppr.
-        """
-        from scipy import sparse
-
-        hip = self.hipporag
-        g = graph if graph is not None else hip.graph
-        n_nodes = g.vcount()
-
-        # Normalize reset_prob
-        reset_prob = np.where(np.isnan(reset_prob) | (reset_prob < 0), 0, reset_prob)
-        total = reset_prob.sum()
-        if total > 0:
-            reset_norm = reset_prob / total
-        else:
-            reset_norm = np.ones(n_nodes) / n_nodes
-
-        # Build sparse transition matrix M where M[j,i] = w(i,j) / out_weight(i)
-        has_weight = "weight" in g.es.attributes()
-        rows, cols, vals = [], [], []
-        out_weights = np.zeros(n_nodes)
-
-        for e in g.es:
-            w = e["weight"] if has_weight else 1.0
-            s, t = e.source, e.target
-            # Undirected: both directions
-            out_weights[s] += w
-            out_weights[t] += w
-            rows.extend([t, s])
-            cols.extend([s, t])
-            vals.extend([w, w])
-
-        # Normalize by out_weights
-        for k in range(len(vals)):
-            src = cols[k]
-            if out_weights[src] > 0:
-                vals[k] /= out_weights[src]
-
-        M = sparse.csr_matrix((vals, (rows, cols)), shape=(n_nodes, n_nodes))
-
-        # Power iteration
-        scores = reset_norm.copy()
-        alpha = damping          # per-node damping array
-        one_minus_alpha = 1.0 - damping
-
-        for iteration in range(max_iter):
-            propagated = M.dot(scores)
-            new_scores = alpha * reset_norm + one_minus_alpha * propagated
-
-            diff = np.abs(new_scores - scores).sum()
-            scores = new_scores
-            if diff < tol:
-                logger.debug(f"Per-node damping PPR converged in {iteration+1} iterations")
-                break
-
-        # Extract passage scores
-        doc_scores = np.array([scores[idx] for idx in hip.passage_node_idxs])
-        sorted_doc_ids = np.argsort(doc_scores)[::-1]
-        sorted_doc_scores = doc_scores[sorted_doc_ids.tolist()]
-
-        return sorted_doc_ids, sorted_doc_scores
+        return selected
 
     # ── Retrieval ──────────────────────────────────────────────────────
 
@@ -798,12 +421,10 @@ class ReasoningController:
         rrf_k = 60
 
         rrf_scores = np.zeros(num_docs)
+        expansion_ppr_scores = np.zeros(num_docs)
         base_node_weights = None
         all_discovered = {}  # name -> vertex_id, accumulated across rounds
-
-        # Initialize ERRWT for this query
-        if ERRWT_ENABLED:
-            self._init_errwt(hip.graph)
+        doc_first_round = {}  # doc_id -> first round it appeared in top-K
 
         for round_i in range(self.max_rounds):
             state.round_idx = round_i
@@ -816,19 +437,6 @@ class ReasoningController:
             if node_weights is not None:
                 base_node_weights = node_weights
 
-            # ERRWT-RAG: reinforce based on retrieval results (skip round 0 — no reasoning signals)
-            if ERRWT_ENABLED and base_node_weights is not None and round_i > 0:
-                orig_emb = hip.embedding_model.batch_encode([state.original_query], norm=True)[0]
-                rewrite_emb = hip.embedding_model.batch_encode([state.current_query], norm=True)[0]
-                self._errwt_update_rag(
-                    top_doc_ids=sorted_doc_ids[:5],
-                    base_node_weights=base_node_weights,
-                    discovered_vids=list(all_discovered.values()) if all_discovered else None,
-                    graph=hip.graph,
-                    original_query_emb=orig_emb,
-                    rewritten_query_emb=rewrite_emb,
-                )
-
             # Step 2: RRF accumulate (later rounds weighted higher)
             round_weight = 1.0 + round_i * RRF_ROUND_BOOST
             for rank, doc_id in enumerate(sorted_doc_ids):
@@ -836,91 +444,65 @@ class ReasoningController:
 
             # Step 3: If we have discovered entities from previous rounds, run expanded PPR
             if all_discovered and base_node_weights is not None:
+                existing_seeds = self._get_existing_seed_ids(base_node_weights)
+
+                # Mini-PPR filtered bridge edges
+                ppr_connections = self._mini_ppr_select_seeds(
+                    discovered_vertex_ids=all_discovered,
+                    existing_seed_vertex_ids=existing_seeds,
+                )
+
                 modified_weights = base_node_weights.copy()
                 for name, vid in all_discovered.items():
                     modified_weights[vid] += self._degree_adaptive_weight(vid, DEFAULT_ENTITY_SEED_WEIGHT)
 
-                existing_seeds = self._get_existing_seed_ids(base_node_weights)
-                overlay = self._build_overlay(
-                    discovered_vertex_ids=list(all_discovered.values()),
-                    existing_seed_vertex_ids=existing_seeds,
-                )
+                overlay = GraphOverlay(self.hipporag.graph)
+                # Only add edges for PPR-selected bridge→seed pairs
+                selected_pairs = set()
+                for d_vid, s_vid, score in ppr_connections:
+                    if score >= PPR_FILTER_THRESHOLD:
+                        bridge_weight = self._degree_adaptive_weight(d_vid, 1.0)
+                        overlay.add_reasoning_edge(d_vid, s_vid, bridge_weight)
+                        selected_pairs.add((d_vid, s_vid))
+
+                # Inter-discovered edges (always connect)
+                d_list = list(all_discovered.values())
+                for i, v1 in enumerate(d_list):
+                    for v2 in d_list[i+1:]:
+                        w = max(self._degree_adaptive_weight(v1, 1.0),
+                                self._degree_adaptive_weight(v2, 1.0))
+                        overlay.add_reasoning_edge(v1, v2, w)
 
                 working_graph = overlay.get_working_graph() if overlay else None
-
-                # Apply ERRWT reinforcement from previous rounds
-                if ERRWT_ENABLED and hasattr(self, '_errwt_reinforcement'):
-                    working_graph = self._errwt_apply_weights(
-                        working_graph if working_graph is not None else hip.graph
-                    )
-
-                # Apply edge attention if configured
-                if EDGE_ATTENTION_MODE == "query_conditioned":
-                    orig_emb = hip.embedding_model.batch_encode([state.original_query], norm=True)[0]
-                    rewrite_emb = hip.embedding_model.batch_encode([state.current_query], norm=True)[0]
-                    discovered_vids = list(all_discovered.values())
-                    working_graph = self._apply_query_conditioned_edge_attention(
-                        orig_emb, rewrite_emb,
-                        discovered_entity_vids=discovered_vids,
-                        graph=working_graph,
-                    )
-                    logger.info(f"  Applied tri-signal edge attention (dir+rewrite+entities)")
-                elif EDGE_ATTENTION_MODE == "graph_propagation":
-                    query_emb = hip.embedding_model.batch_encode([state.current_query], norm=True)[0]
-                    prop_weights = self._apply_graph_propagation_attention(query_emb)
-                    # Merge: keep original seeds + add propagation-derived seeds
-                    alpha = 0.3  # blend factor for propagation
-                    modified_weights = modified_weights + alpha * prop_weights
-                    logger.info(f"  Applied graph propagation attention (alpha={alpha})")
-
-                # Run PPR: per-node damping or standard
-                if PER_NODE_DAMPING:
-                    orig_emb = hip.embedding_model.batch_encode([state.original_query], norm=True)[0]
-                    rewrite_emb = hip.embedding_model.batch_encode([state.current_query], norm=True)[0]
-                    node_damping = self._compute_per_node_damping(
-                        orig_emb, rewrite_emb,
-                        discovered_vids=list(all_discovered.values()),
-                    )
-                    boosted_doc_ids, boosted_doc_scores = self._run_ppr_per_node_damping(
-                        modified_weights,
-                        damping=node_damping,
-                        graph=working_graph,
-                    )
-                    logger.info(f"  Per-node damping PPR: damping range [{node_damping.min():.2f}, {node_damping.max():.2f}]")
-                else:
-                    boosted_doc_ids, boosted_doc_scores = hip.run_ppr(
-                        modified_weights,
-                        damping=EXPANSION_DAMPING,
-                        graph=working_graph,
-                    )
-
-                for rank, doc_id in enumerate(boosted_doc_ids):
-                    rrf_scores[doc_id] += round_weight / (rrf_k + rank + 1)
-
-                logger.info(
-                    f"  Seed expansion PPR: {len(all_discovered)} entities, "
-                    f"bridge edges: {overlay.num_temp_edges if overlay else 0}, "
-                    f"round_weight: {round_weight:.1f}, "
-                    f"errwt: {ERRWT_ENABLED}"
+                boosted_doc_ids, boosted_doc_scores = hip.run_ppr(
+                    modified_weights,
+                    damping=EXPANSION_DAMPING,
+                    graph=working_graph,
                 )
 
-            # Build current result from RRF scores
-            final_sorted_ids = np.argsort(rrf_scores)[::-1]
+                # Expansion PPR: use raw PPR scores, overwrite (not accumulate)
+                expansion_ppr_scores = np.zeros(num_docs)
+                for doc_id, score in zip(boosted_doc_ids, boosted_doc_scores):
+                    expansion_ppr_scores[doc_id] = score
+
+                logger.info(
+                    f"  PPR-filtered expansion: {len(all_discovered)} entities, "
+                    f"selected edges: {len(selected_pairs)}/{len(ppr_connections)}, "
+                    f"round_weight: {round_weight:.1f}"
+                )
+
+            combined_scores = expansion_ppr_scores + RRF_WEIGHT * rrf_scores
+            final_sorted_ids = np.argsort(combined_scores)[::-1]
             top_k_docs = [
                 hip.chunk_embedding_store.get_row(hip.passage_node_keys[idx])["content"]
                 for idx in final_sorted_ids[:num_to_retrieve]
             ]
 
-            # PPR diagnostics (always against original query for cross-round comparison)
-            ppr_diag = {}
-            if base_node_weights is not None:
-                ppr_diag = self._compute_ppr_diagnostics(base_node_weights, state.original_query)
-                logger.info(
-                    f"  PPR diag: entropy={ppr_diag['entropy']:.3f}, "
-                    f"concentration={ppr_diag['concentration']:.3f}, "
-                    f"query_sim={ppr_diag['query_sim']:.3f}, "
-                    f"coverage_gap={ppr_diag['coverage_gap']:.3f}"
-                )
+            # Track first appearance round for each doc in top-K
+            for doc_id in final_sorted_ids[:num_to_retrieve]:
+                did = int(doc_id)
+                if did not in doc_first_round:
+                    doc_first_round[did] = round_i
 
             # Evaluate
             round_metrics = {}
@@ -932,13 +514,6 @@ class ReasoningController:
                 metrics=round_metrics,
                 query_used=state.current_query,
             )
-            # Attach PPR diagnostics to the round metrics
-            if ppr_diag and state.round_metrics:
-                rm = state.round_metrics[-1]
-                rm.ppr_entropy = ppr_diag.get("entropy", 0.0)
-                rm.ppr_concentration = ppr_diag.get("concentration", 0.0)
-                rm.ppr_query_sim = ppr_diag.get("query_sim", 0.0)
-                rm.ppr_coverage_gap = ppr_diag.get("coverage_gap", 0.0)
 
             round_time = time.time() - round_start
             logger.info(
@@ -975,7 +550,7 @@ class ReasoningController:
                 logger.info(f"  Query rewritten: '{new_query[:60]}...'")
                 state.current_query = new_query
 
-            # Entity seed expansion (from Exp 2)
+            # Entity seed expansion
             discovered_entities = reasoning_output.get("discovered_entities", [])
             if discovered_entities:
                 logger.info(f"  Discovered entities: {discovered_entities}")
@@ -986,13 +561,24 @@ class ReasoningController:
                 )
                 logger.info(f"  Total resolved entities: {len(all_discovered)}")
 
-        # Final result from RRF scores
-        final_sorted_ids = np.argsort(rrf_scores)[::-1]
+        combined_scores = expansion_ppr_scores + RRF_WEIGHT * rrf_scores
+        final_sorted_ids = np.argsort(combined_scores)[::-1]
+
         final_docs = [
             hip.chunk_embedding_store.get_row(hip.passage_node_keys[idx])["content"]
             for idx in final_sorted_ids[:num_to_retrieve]
         ]
-        final_scores = rrf_scores[final_sorted_ids[:num_to_retrieve]].tolist()
+        final_scores = [combined_scores[idx] for idx in final_sorted_ids[:num_to_retrieve]]
+
+        # LLM reranker: reorder docs based on reasoning trajectory
+        if state.reasoning_traces:
+            reranked_docs = self._llm_reasoning_rerank(
+                query=state.original_query,
+                docs=final_docs,
+                reasoning_traces=state.reasoning_traces,
+            )
+            if reranked_docs is not None:
+                final_docs = reranked_docs
 
         return QuerySolution(
             question=state.original_query,
@@ -1000,6 +586,168 @@ class ReasoningController:
             doc_scores=final_scores,
             answer=None,
         )
+
+    def _llm_reasoning_rerank(
+        self,
+        query: str,
+        docs: List[str],
+        reasoning_traces: List[str],
+    ) -> Optional[List[str]]:
+        """Use LLM to reorder documents based on reasoning trajectory.
+
+        The LLM sees the reasoning steps and reorders docs so that
+        the QA model reads them in the logical order of the reasoning chain.
+        """
+        import json as _json
+
+        traces_text = "\n".join(f"Step {i+1}: {t}" for i, t in enumerate(reasoning_traces) if t)
+        if not traces_text.strip():
+            return None
+
+        docs_text = ""
+        for i, doc in enumerate(docs):
+            docs_text += f"[Doc {i+1}] {doc[:300]}\n\n"
+
+        prompt = f"""Given a multi-hop question and the reasoning steps used to find information, reorder the documents so they follow the logical reasoning chain. Documents supporting earlier reasoning steps should come first.
+
+Question: {query}
+
+Reasoning steps:
+{traces_text}
+
+Documents:
+{docs_text}
+
+Return a JSON list of document numbers in the recommended reading order. Only include the numbers, e.g. [3, 1, 5, 2, 4].
+Important: include ALL document numbers exactly once."""
+
+        try:
+            messages = [
+                {"role": "system", "content": "You are a document ordering assistant. Return only a JSON list of integers."},
+                {"role": "user", "content": prompt},
+            ]
+            response, _, _ = self.hipporag.llm_model.infer(messages)
+
+            # Parse response
+            text = response.strip()
+            if "```" in text:
+                text = text.split("```")[1].split("```")[0].strip()
+                if text.startswith("json"):
+                    text = text[4:].strip()
+
+            order = _json.loads(text)
+            if not isinstance(order, list) or len(order) != len(docs):
+                logger.warning(f"  LLM rerank returned invalid order: {order}")
+                return None
+
+            # Convert 1-indexed to 0-indexed
+            reranked = []
+            for idx in order:
+                i = int(idx) - 1
+                if 0 <= i < len(docs):
+                    reranked.append(docs[i])
+
+            if len(reranked) != len(docs):
+                logger.warning(f"  LLM rerank: missing docs after reorder")
+                return None
+
+            logger.info(f"  LLM reasoning rerank: {order}")
+            return reranked
+
+        except Exception as e:
+            logger.warning(f"  LLM reasoning rerank failed: {e}")
+            return None
+
+    def _subgraph_rerank(
+        self,
+        doc_ids: np.ndarray,
+        base_node_weights: Optional[np.ndarray],
+        discovered_vertex_ids: Dict[str, int],
+    ) -> Optional[np.ndarray]:
+        """Re-rank top-N docs by running PPR on their local subgraph.
+
+        1. Collect entity neighbors of top-N docs → small subgraph
+        2. Run PPR from query seeds + bridge entities on subgraph
+        3. Rank docs directly by subgraph PPR score
+        """
+        hip = self.hipporag
+        graph = hip.graph
+        passage_idx_set = set(hip.passage_node_idxs)
+
+        # Step 1: Collect subgraph — doc passage nodes + their entity neighbors + 1-hop
+        subgraph_vids = set()
+        doc_vid_map = {}  # doc_id -> passage vertex id
+        for doc_id in doc_ids:
+            p_vid = hip.passage_node_idxs[doc_id]
+            doc_vid_map[doc_id] = p_vid
+            subgraph_vids.add(p_vid)
+            for n in graph.neighbors(p_vid):
+                subgraph_vids.add(n)
+                if n not in passage_idx_set:
+                    for nn in graph.neighbors(n):
+                        subgraph_vids.add(nn)
+
+        # Add bridge entity vertices
+        for vid in discovered_vertex_ids.values():
+            subgraph_vids.add(vid)
+
+        # Add original seed vertices
+        if base_node_weights is not None:
+            for vid in range(len(base_node_weights)):
+                if base_node_weights[vid] > 0 and vid not in passage_idx_set:
+                    subgraph_vids.add(vid)
+
+        subgraph_vids = sorted(subgraph_vids)
+        if len(subgraph_vids) < 2:
+            return None
+
+        sub = graph.subgraph(subgraph_vids)
+        vid_to_sub = {vid: i for i, vid in enumerate(subgraph_vids)}
+        n_sub = len(subgraph_vids)
+
+        # Step 2: Build reset vector — query seeds + bridge entities
+        reset = np.zeros(n_sub)
+        if base_node_weights is not None:
+            for vid in range(len(base_node_weights)):
+                if base_node_weights[vid] > 0 and vid in vid_to_sub:
+                    reset[vid_to_sub[vid]] = base_node_weights[vid]
+        for vid in discovered_vertex_ids.values():
+            if vid in vid_to_sub:
+                reset[vid_to_sub[vid]] += self._degree_adaptive_weight(vid, DEFAULT_ENTITY_SEED_WEIGHT)
+        if reset.sum() == 0:
+            return None
+        reset /= reset.sum()
+
+        # Step 3: PPR on subgraph
+        ppr_scores = sub.personalized_pagerank(
+            vertices=range(n_sub),
+            damping=EXPANSION_DAMPING,
+            directed=False,
+            weights='weight' if 'weight' in sub.es.attributes() else None,
+            reset=reset,
+            implementation='prpack',
+        )
+
+        # Step 4: Rank docs directly by subgraph PPR score
+        doc_scores = []
+        for doc_id in doc_ids:
+            p_vid = doc_vid_map[doc_id]
+            sub_idx = vid_to_sub.get(p_vid)
+            score = ppr_scores[sub_idx] if sub_idx is not None else 0.0
+            doc_scores.append((doc_id, score))
+
+        doc_scores.sort(key=lambda x: x[1], reverse=True)
+        new_order = [d[0] for d in doc_scores]
+
+        # Log
+        original_order = list(doc_ids)
+        changes = sum(1 for i, (o, n) in enumerate(zip(original_order[:5], new_order[:5])) if o != n)
+        logger.info(
+            f"  Subgraph rerank: {n_sub} nodes, {sub.ecount()} edges, "
+            f"top-5 changes: {changes}/5"
+        )
+
+        return np.array(new_order)
 
     def _evaluate_round(
         self, retrieved_docs: List[str], gold_docs: List[str]
@@ -1054,19 +802,5 @@ class ReasoningController:
 
         entities_per_query = [len(s.discovered_entities) for s in all_round_states]
         eval_results["avg_entities_discovered"] = round(np.mean(entities_per_query), 2)
-
-        # PPR diagnostics per query (for cross-round analysis)
-        # When running 1 query at a time, this has 1 entry
-        for state in all_round_states:
-            query_diags = []
-            for rm in state.round_metrics:
-                query_diags.append({
-                    "round": rm.round_idx,
-                    "entropy": round(rm.ppr_entropy, 4),
-                    "concentration": round(rm.ppr_concentration, 4),
-                    "query_sim": round(rm.ppr_query_sim, 4),
-                    "coverage_gap": round(rm.ppr_coverage_gap, 4),
-                })
-            eval_results["ppr_diagnostics"] = query_diags  # per-round list for this query
 
         return eval_results
