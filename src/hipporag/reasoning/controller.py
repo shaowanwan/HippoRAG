@@ -26,11 +26,11 @@ EXPANSION_DAMPING = 0.7
 # LP boost: multiply bridge edge weight when LLM predicted the link
 LP_BOOST = 1.5
 
-# Mini-PPR threshold: only build bridge edge if PPR score > this (covers ~6 hops)
-PPR_FILTER_THRESHOLD = 0.000001
+# Mini-PPR threshold for bridge edge selection
+MINI_PPR_THRESHOLD = 0.0001
 
-# RRF weight: scale factor for pipeline RRF relative to PPR (PPR is primary)
-RRF_WEIGHT = 0.1
+# Pipeline RRF weight (expansion PPR RRF = 1.0)
+PIPELINE_RRF_WEIGHT = 0.5
 
 
 
@@ -308,10 +308,11 @@ class ReasoningController:
         self,
         discovered_vertex_ids: Dict[str, int],
         existing_seed_vertex_ids: List[int],
+        round0_top_doc_ids: List[int] = None,
     ) -> List[Tuple[int, int, float]]:
         """Run mini-PPR from all bridge entities together on local subgraph.
 
-        Uses subgraph (bridge + seeds + 3-hop neighbors) instead of full graph for speed.
+        Subgraph built from round 0 top docs' entities + bridge + seeds, expanded 10 hops.
         All bridge entities as seeds in one PPR run. Select seed connections by threshold.
 
         Returns list of (bridge_vid, seed_vid, ppr_score) for selected connections.
@@ -320,10 +321,17 @@ class ReasoningController:
         graph = hip.graph
         passage_idx_set = set(hip.passage_node_idxs)
 
-        # Build subgraph: bridge entities + seeds + 3-hop entity neighbors
+        # Build subgraph from round 0 top docs' entities + bridge + seeds
         core_vids = set(discovered_vertex_ids.values()) | set(existing_seed_vertex_ids)
+        if round0_top_doc_ids is not None:
+            for doc_id in round0_top_doc_ids:
+                p_vid = hip.passage_node_idxs[doc_id]
+                for n in graph.neighbors(p_vid):
+                    if n not in passage_idx_set:
+                        core_vids.add(n)
+
         subgraph_vids = set(core_vids)
-        for hop in range(3):
+        for hop in range(5):
             frontier = set()
             for vid in subgraph_vids:
                 for n in graph.neighbors(vid):
@@ -372,7 +380,7 @@ class ReasoningController:
 
         # Connect all seeds with non-zero score to all bridge entities
         for s_vid, score in seed_scores:
-            if score > 0:
+            if score >= MINI_PPR_THRESHOLD:
                 for d_vid in bridge_vids:
                     selected.append((d_vid, s_vid, score))
 
@@ -421,10 +429,10 @@ class ReasoningController:
         rrf_k = 60
 
         rrf_scores = np.zeros(num_docs)
-        expansion_ppr_scores = np.zeros(num_docs)
         base_node_weights = None
         all_discovered = {}  # name -> vertex_id, accumulated across rounds
         doc_first_round = {}  # doc_id -> first round it appeared in top-K
+        round0_top_doc_ids = None  # top doc IDs from round 0
 
         for round_i in range(self.max_rounds):
             state.round_idx = round_i
@@ -437,10 +445,14 @@ class ReasoningController:
             if node_weights is not None:
                 base_node_weights = node_weights
 
+            # Save round 0 top docs for subgraph construction
+            if round_i == 0:
+                round0_top_doc_ids = [int(d) for d in sorted_doc_ids[:20]]
+
             # Step 2: RRF accumulate (later rounds weighted higher)
             round_weight = 1.0 + round_i * RRF_ROUND_BOOST
             for rank, doc_id in enumerate(sorted_doc_ids):
-                rrf_scores[doc_id] += round_weight / (rrf_k + rank + 1)
+                rrf_scores[doc_id] += PIPELINE_RRF_WEIGHT * round_weight / (rrf_k + rank + 1)
 
             # Step 3: If we have discovered entities from previous rounds, run expanded PPR
             if all_discovered and base_node_weights is not None:
@@ -450,6 +462,7 @@ class ReasoningController:
                 ppr_connections = self._mini_ppr_select_seeds(
                     discovered_vertex_ids=all_discovered,
                     existing_seed_vertex_ids=existing_seeds,
+                    round0_top_doc_ids=round0_top_doc_ids,
                 )
 
                 modified_weights = base_node_weights.copy()
@@ -460,10 +473,9 @@ class ReasoningController:
                 # Only add edges for PPR-selected bridge→seed pairs
                 selected_pairs = set()
                 for d_vid, s_vid, score in ppr_connections:
-                    if score >= PPR_FILTER_THRESHOLD:
-                        bridge_weight = self._degree_adaptive_weight(d_vid, 1.0)
-                        overlay.add_reasoning_edge(d_vid, s_vid, bridge_weight)
-                        selected_pairs.add((d_vid, s_vid))
+                    bridge_weight = self._degree_adaptive_weight(d_vid, 1.0)
+                    overlay.add_reasoning_edge(d_vid, s_vid, bridge_weight)
+                    selected_pairs.add((d_vid, s_vid))
 
                 # Inter-discovered edges (always connect)
                 d_list = list(all_discovered.values())
@@ -480,10 +492,9 @@ class ReasoningController:
                     graph=working_graph,
                 )
 
-                # Expansion PPR: use raw PPR scores, overwrite (not accumulate)
-                expansion_ppr_scores = np.zeros(num_docs)
-                for doc_id, score in zip(boosted_doc_ids, boosted_doc_scores):
-                    expansion_ppr_scores[doc_id] = score
+                # Expansion PPR: convert to RRF rank and accumulate (weight 1.0)
+                for rank, doc_id in enumerate(boosted_doc_ids):
+                    rrf_scores[doc_id] += round_weight / (rrf_k + rank + 1)
 
                 logger.info(
                     f"  PPR-filtered expansion: {len(all_discovered)} entities, "
@@ -491,8 +502,7 @@ class ReasoningController:
                     f"round_weight: {round_weight:.1f}"
                 )
 
-            combined_scores = expansion_ppr_scores + RRF_WEIGHT * rrf_scores
-            final_sorted_ids = np.argsort(combined_scores)[::-1]
+            final_sorted_ids = np.argsort(rrf_scores)[::-1]
             top_k_docs = [
                 hip.chunk_embedding_store.get_row(hip.passage_node_keys[idx])["content"]
                 for idx in final_sorted_ids[:num_to_retrieve]
@@ -561,14 +571,13 @@ class ReasoningController:
                 )
                 logger.info(f"  Total resolved entities: {len(all_discovered)}")
 
-        combined_scores = expansion_ppr_scores + RRF_WEIGHT * rrf_scores
-        final_sorted_ids = np.argsort(combined_scores)[::-1]
+        final_sorted_ids = np.argsort(rrf_scores)[::-1]
 
         final_docs = [
             hip.chunk_embedding_store.get_row(hip.passage_node_keys[idx])["content"]
             for idx in final_sorted_ids[:num_to_retrieve]
         ]
-        final_scores = [combined_scores[idx] for idx in final_sorted_ids[:num_to_retrieve]]
+        final_scores = [rrf_scores[idx] for idx in final_sorted_ids[:num_to_retrieve]]
 
         # LLM reranker: reorder docs based on reasoning trajectory
         if state.reasoning_traces:

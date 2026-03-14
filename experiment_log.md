@@ -355,3 +355,168 @@ The only change is in `controller.py`:
   - Seed weights: PPR normalizes reset_prob → absolute values don't matter, only ratios
   - Bridge weights: stronger edges over-concentrate probability at bridge-connected nodes
 - Results are robust across 2 independent runs (±0.5% variance)
+
+---
+
+## Exp 9: Edge Attention + ERRWT (2026-03-12)
+- **Branch**: feature/graph-reshape
+- **Method**: Exp 8 + tri-signal edge attention + bridge-focused ERRWT
+- **Tri-signal attention**: direction α=1.0, rewrite β=0.4, entity proximity γ=0.4, temperature τ=0.15, boost-only (gate ≥ 1.0)
+- **ERRWT**: ρ=1.5, decay=0.8, bridge-focused (only bridge↔seed edges), degree-normalized ρ/log(1+avg_deg), cross-round ×1.5, co-discovery ×1.2
+
+### Results
+| Metric | Baseline | Reasoning | Delta |
+|--------|----------|-----------|-------|
+| EM     | 0.415    | 0.515     | **+10.0%** |
+| R@5    | 0.662    | 0.814     | **+15.2%** |
+
+### By Hops
+| Hops | N | ΔR@5 | ΔEM |
+|------|---|------|-----|
+| 2 | 103 | +12.1% | +10.7% |
+| 3 | 51 | +17.8% | +10.3% |
+| 4 | 39 | +19.2% | +7.7% |
+
+- Improved: 70, Hurt: 7
+- **Best EM so far** at +10.0%
+
+---
+
+## Exp 10: Link Prediction with Entity Pairs (2026-03-13)
+- **Branch**: feature/graph-reshape
+- **Method**: Exp 9 + LLM link prediction with entity pairs from knowledge graph
+- **Key changes**:
+  1. **Entity pairs in prompt**: Instead of raw entity lists, show doc's entity pairs `(entity_a, entity_b)` from the KG. More structured, less noisy.
+  2. **Link prediction**: LLM specifies `link_to` for each bridge entity — which existing entities to connect to. Only these edges built in overlay (no full bipartite).
+  3. **Entity limit**: Prompt limits to 1-3 bridge entities (down from 5). "Fewer high-quality bridges are better."
+  4. **Selective overlay**: Only LLM-predicted edges built. Fallback to full bipartite only for entities without link predictions.
+
+### Architecture Changes
+
+**Prompt** (query_rewriter.py):
+- System prompt: asks for `{"name": "...", "link_to": ["existing_entity1", ...]}` format
+- User prompt: shows `Entity pairs: (entity_a, entity_b); ...` per doc (max 8 pairs)
+- Emphasis on selectivity: "only include entities you are confident bridge different documents"
+
+**Overlay** (controller.py `_build_overlay`):
+- If link_predictions provided: only build edges specified by LLM
+- Each bridge entity → connect only to its `link_to` targets (resolved by name or embedding)
+- Entities without link predictions fallback to full bipartite with all seeds
+- Inter-discovered edges still always built
+
+**Doc facts** (controller.py `_get_doc_facts`):
+- Returns entity pairs (entities connected in graph within same doc) instead of entity lists
+- Max 10 pairs per doc
+
+### Results
+| Metric | Baseline | Reasoning | Delta |
+|--------|----------|-----------|-------|
+| EM     | 0.425    | 0.505     | **+8.0%** |
+| R@5    | 0.672    | 0.794     | **+18.2%** |
+
+### Statistics
+- Avg reasoning rounds: 1.76
+- Samples with entities: 95/200 (47.5%)
+- Avg entities discovered (when >0): 3.6
+- Improved: 61, Hurt: 8, Same: 131
+- Total time: ~75 min
+
+### By Entity Count
+| Entities | N | ΔR@5 | Improved | Hurt |
+|----------|---|------|----------|------|
+| 0 | 105 | +0.005 | 1 | 0 |
+| 1-3 | 50 | **+0.420** | 44 | 1 |
+| 4-6 | 45 | +0.067 | 16 | 7 |
+
+### By Hops
+| Hops | N | ΔR@5 | ΔEM |
+|------|---|------|-----|
+| 2 | 103 | +11.2% | +8.7% |
+| 3 | 58 | +12.1% | +12.1% |
+| 4 | 39 | +15.4% | +0.0% |
+
+### Comparison with All Experiments
+| Exp | Method | EM Δ | R@5 Δ | Improved | Hurt |
+|-----|--------|------|-------|----------|------|
+| 1 | Query rewrite only | +4.0% | +11.2% | — | — |
+| 4 | Combined full pipeline | +8.0% | +13.4% | — | — |
+| 8 | + Degree-adaptive | +10.3% | +14.8% | — | — |
+| 9 | + Edge attention + ERRWT | +10.0% | +15.2% | 70 | 7 |
+| **10** | **+ Link prediction (entity pairs)** | **+8.0%** | **+18.2%** | **61** | **8** |
+
+### Key Insights
+- **R@5 is the best ever** at +18.2%, showing link prediction improves retrieval precision
+- **EM dropped** from +10.0% to +8.0% — entity pairs reduce noise but also reduce recall for QA
+- **1-3 entities is the sweet spot**: ΔR@5=+42%, 44/45 improved. More entities = more noise
+- **Entity pairs >> entity lists**: Previous experiment with flat entity lists gave ΔR@5=+16.2% but ΔEM=+5.9%. Entity pairs are more structured and less noisy
+- **4-hop EM=0**: Link prediction helps retrieval but doesn't help 4-hop QA — the chains are too long for the QA model
+- **Ablation**: Full bipartite + LP boost (×2.0) performed worse than LP-only on 10-sample test (LP-only: +17.5%, bipartite+boost: +10.0%). Selective edges outperform noisy full connections
+
+---
+
+## Exp 11: Subgraph Mini-PPR + LLM Reasoning Reranker (commit 8d216b4)
+
+### Setup
+- Subgraph mini-PPR (3-hop) for bridge edge selection, joint seeds, threshold=1e-6
+- PPR raw scores as primary signal, RRF * 0.1 as secondary
+- Degree-adaptive bridge edge weights
+- **LLM reasoning reranker**: reorders top-K docs by reasoning trajectory before QA
+
+### Results (200 samples)
+| Metric | Baseline | Reasoning | Improvement |
+|--------|----------|-----------|-------------|
+| EM     | 0.415    | 0.515     | **+10.0%**  |
+| F1     | 0.507    | 0.615     | **+10.8%**  |
+| R@5    | 0.670    | 0.890     | **+22.0%**  |
+| R@10   | 0.850    | 0.962     | +11.2%      |
+
+### Ablation context (same session, 200 samples each)
+| Variant | EM Δ | F1 Δ | R@5 Δ |
+|---------|------|------|-------|
+| Exp 8 (full bipartite + RRF) | +11.0% | +9.8% | +11.2% |
+| PPR+RRF=0.05 (no reranker) | +7.0% | +6.9% | +18.0% |
+| PPR+RRF=0.1 (no reranker) | +8.0% | +7.9% | +18.1% |
+| Subgraph mini-PPR + RRF only | +9.5% | +8.9% | +14.8% |
+| **PPR+RRF=0.1 + LLM reranker** | **+10.0%** | **+10.8%** | **+22.0%** |
+
+### Key findings
+- PPR raw scores improve recall but hurt ranking → RRF alone gives better EM
+- LLM reranker bridges the gap: reorders docs by reasoning chain, recovering EM while keeping high recall
+- R@5 +22% is the highest across all experiments
+- F1 +10.8% exceeds Exp 8's +9.8%
+
+---
+
+## Exp 12: 5-hop subgraph + dual RRF + pipeline weight 0.5 (2026-03-14)
+- **Branch**: feature/graph-reshape
+- **Method**: 5-hop subgraph mini-PPR (threshold 0.0001), dual RRF (pipeline 0.5, expansion 1.0), LLM reranker, degree-adaptive weights, full bipartite bridge edges
+- **Max rounds**: 3
+- **Changes from Exp 11**: Unified threshold (removed redundant PPR_FILTER_THRESHOLD), 5-hop subgraph (was 10), pipeline RRF weight 0.5 (was 0.1), expansion uses RRF (was raw PPR)
+
+### Results
+| Metric | Baseline | Reasoning | Delta |
+|--------|----------|-----------|-------|
+| EM     | 0.420    | 0.520     | **+10.0%**  |
+| F1     | 0.509    | 0.600     | +9.1%       |
+| R@5    | 0.672    | 0.872     | **+20.0%**  |
+| R@10   | 0.850    | 0.950     | +10.0%      |
+
+### By hop count
+| Hops | N   | B_EM  | R_EM  | Δ_EM    | B_R@5 | R_R@5 | Δ_R@5   |
+|------|-----|-------|-------|---------|-------|-------|---------|
+| 2    | 103 | 0.495 | 0.641 | +14.6%  | 0.782 | 0.951 | +17.0%  |
+| 3    | 58  | 0.276 | 0.362 | +8.6%   | 0.609 | 0.822 | +21.3%  |
+| 4    | 39  | 0.436 | 0.436 | +0.0%   | 0.474 | 0.737 | +26.3%  |
+
+### Ablation: Pipeline RRF weight
+| Pipeline weight | EM    | Δ_EM   | R@5   | Δ_R@5  |
+|-----------------|-------|--------|-------|--------|
+| 0.5             | 0.520 | +10.0% | 0.872 | +20.0% |
+| 1.0 (equal)     | 0.500 | +8.5%  | 0.885 | +21.5% |
+
+### Key findings
+- Pipeline weight 0.5 is better than equal weighting: higher EM (+10% vs +8.5%), slightly lower recall
+- R@5 +20% is very strong, close to Exp 11's +22%
+- 4-hop questions: R@5 improves +26.3% but EM stays flat → QA model capability is the bottleneck
+- 2-hop benefits most from reasoning: EM +14.6%
+- Mini-PPR threshold 0.0001 (unified, single layer) works well
