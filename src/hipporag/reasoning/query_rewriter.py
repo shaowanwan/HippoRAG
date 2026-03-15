@@ -31,6 +31,26 @@ Rules:
 """
 
 
+ONE_SHOT_INPUT = """Original query: What company succeeded the owner of Empire Sports Network?
+Current query (round 0): What company succeeded the owner of Empire Sports Network?
+
+Retrieved documents so far:
+[Doc 1] Empire Sports Network was a regional sports network covering Western New York and parts of Pennsylvania. It was owned by Adelphia Communications until the company's bankruptcy in 2002.
+
+[Doc 2] Adelphia Communications Corporation was an American cable television company. Founded in 1952, it was the fifth-largest cable company in the United States before filing for bankruptcy in 2002.
+
+[Doc 3] The Buffalo Sabres are a professional ice hockey team based in Buffalo, New York. Their games were broadcast on Empire Sports Network.
+
+Analyze and provide your reasoning output in JSON."""
+
+ONE_SHOT_OUTPUT = """{
+    "analysis": "The documents reveal that Empire Sports Network was owned by Adelphia Communications. We now need to find what company succeeded or acquired Adelphia Communications after its bankruptcy.",
+    "discovered_entities": ["adelphia communications"],
+    "rewritten_query": "What company acquired or succeeded Adelphia Communications after its bankruptcy?",
+    "should_stop": false
+}"""
+
+
 def build_rewrite_prompt(
     original_query: str,
     current_query: str,
@@ -40,8 +60,8 @@ def build_rewrite_prompt(
 ) -> List[dict]:
     """Build the LLM prompt for query rewriting."""
     docs_text = ""
-    for i, doc in enumerate(retrieved_docs[:10]):
-        docs_text += f"[Doc {i+1}] {doc[:500]}\n\n"
+    for i, doc in enumerate(retrieved_docs[:5]):
+        docs_text += f"[Doc {i+1}] {doc}\n\n"
 
     user_content = f"""Original query: {original_query}
 Current query (round {round_idx}): {current_query}
@@ -58,6 +78,8 @@ Retrieved documents so far:
 
     return [
         {"role": "system", "content": REWRITE_SYSTEM_PROMPT},
+        {"role": "user", "content": ONE_SHOT_INPUT},
+        {"role": "assistant", "content": ONE_SHOT_OUTPUT},
         {"role": "user", "content": user_content},
     ]
 

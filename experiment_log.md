@@ -520,3 +520,53 @@ The only change is in `controller.py`:
 - 4-hop questions: R@5 improves +26.3% but EM stays flat → QA model capability is the bottleneck
 - 2-hop benefits most from reasoning: EM +14.6%
 - Mini-PPR threshold 0.0001 (unified, single layer) works well
+
+---
+
+## Exp 13: Reasoning Prompt Ablation (2026-03-15)
+- **Branch**: feature/graph-reshape (base: commit 09fbaee)
+- **Method**: Ablation study on reasoning prompt design — one-shot example and doc truncation
+- **Base config**: Exp 12 (5-hop subgraph, pipeline RRF 0.5, LLM reranker, degree-adaptive)
+
+### Variants tested
+| Variant | One-shot | Docs in prompt | Truncation |
+|---------|----------|----------------|------------|
+| A (Exp 12 base) | No | top 10 | 500 chars |
+| B | Adelphia multi-hop | top 10 | 500 chars |
+| C | No | top 5 | Full |
+| **D (combined)** | **Adelphia multi-hop** | **top 5** | **Full** |
+
+### Results (all 200 samples)
+| Variant | EM | Δ_EM | F1 | Δ_F1 | R@5 | Δ_R@5 |
+|---------|-----|------|-----|------|-----|--------|
+| A (base) | 0.520 | +10.0% | 0.600 | +9.1% | 0.872 | +20.0% |
+| **B (one-shot)** | **0.530** | **+12.0%** | 0.612 | +10.4% | 0.873 | +20.6% |
+| C (top5 full) | 0.530 | +10.5% | 0.623 | +11.5% | 0.879 | +21.3% |
+| D (combined) | 0.495 | +8.0% | 0.598 | +9.0% | 0.860 | +19.0% |
+
+### One-shot example (Adelphia Communications)
+```
+Query: "What company succeeded the owner of Empire Sports Network?"
+→ Discovers bridge entity "adelphia communications"
+→ Rewrites: "What company acquired or succeeded Adelphia Communications after its bankruptcy?"
+```
+
+### Key findings
+- **One-shot (B) achieves best EM**: +12.0%, the highest across ALL experiments
+- **Top5 full (C) achieves best F1/R@5**: full docs give LLM more context for entity discovery
+- **Combined (D) is worst**: +8.0% EM — one-shot + full docs creates too-long prompts, likely degrading qwen-plus reasoning quality on long context
+- **The two improvements interfere**: top5 full docs add ~2-5x more tokens; combined with one-shot, total prompt may exceed model's effective reasoning window
+- Hypothesis: qwen-plus long-context reasoning quality degrades — shorter, focused prompts (top10×500 or top5×full, not both) work better
+
+### Comparison with All Experiments
+| Exp | Method | EM Δ | F1 Δ | R@5 Δ |
+|-----|--------|------|------|-------|
+| 1 | Query rewrite only | +4.0% | +5.1% | +11.2% |
+| 4 | Combined full pipeline | +8.0% | +6.7% | +13.4% |
+| 8 | + Degree-adaptive | +10.3% | +9.9% | +14.8% |
+| 9 | + Edge attention + ERRWT | +10.0% | — | +15.2% |
+| 11 | + PPR + LLM reranker | +10.0% | +10.8% | +22.0% |
+| 12 | 5-hop + dual RRF | +10.0% | +9.1% | +20.0% |
+| **13B** | **+ One-shot prompt** | **+12.0%** | **+10.4%** | **+20.6%** |
+| 13C | + Top5 full docs | +10.5% | +11.5% | +21.3% |
+| 13D | + Both combined | +8.0% | +9.0% | +19.0% |
