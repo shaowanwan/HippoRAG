@@ -1549,6 +1549,8 @@ class HippoRAG:
                                         top_k_facts: List[Tuple],
                                         top_k_fact_indices: List[str],
                                         passage_node_weight: float = 0.05,
+                                        extra_node_weights: np.ndarray = None,
+                                        working_graph=None,
                                         return_node_weights: bool = False) -> Tuple[np.ndarray, np.ndarray]:
         """
         Computes document scores based on fact-based similarity and relevance using personalized
@@ -1674,11 +1676,15 @@ class HippoRAG:
         if len(linking_score_map) > 30:
             linking_score_map = dict(sorted(linking_score_map.items(), key=lambda x: x[1], reverse=True)[:30])
 
+        # Inject extra node weights from reasoning (entity seed expansion)
+        if extra_node_weights is not None:
+            node_weights += extra_node_weights
+
         assert sum(node_weights) > 0, f'No phrases found in the graph for the given facts: {top_k_facts}'
 
         #Running PPR algorithm based on the passage and phrase weights previously assigned
         ppr_start = time.time()
-        ppr_sorted_doc_ids, ppr_sorted_doc_scores = self.run_ppr(node_weights, damping=self.global_config.damping)
+        ppr_sorted_doc_ids, ppr_sorted_doc_scores = self.run_ppr(node_weights, damping=self.global_config.damping, graph=working_graph)
         ppr_end = time.time()
         # ===== DEBUG: 打印 PPR 排序后的 passage =====
         print("\n===== TOP PPR PASSAGES =====")

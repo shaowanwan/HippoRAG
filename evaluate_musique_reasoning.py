@@ -14,8 +14,10 @@ import sys
 import random
 import argparse
 import logging
+import signal
 import time
 import traceback
+import gc
 
 import numpy as np
 
@@ -184,9 +186,10 @@ def save_results(output_path, config, all_results):
         )
 
 
-def run_evaluation(data, sample_limit, max_rounds):
+def run_evaluation(data, sample_limit, max_rounds, openie_cache=None):
     # Import inside function to avoid multiprocessing spawn issue on macOS
     from src.hipporag import HippoRAG
+    import shutil
 
     if sample_limit and sample_limit < len(data):
         data = data[:sample_limit]
@@ -200,14 +203,16 @@ def run_evaluation(data, sample_limit, max_rounds):
         "LLM_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"
     )
 
-    # Separate output dirs per embedding model to avoid cache conflicts
-    # Default MiniLM uses base dir for backward compatibility with existing sample dirs
+    # Separate output dirs per config to avoid cache conflicts
+    # Default MiniLM + qwen-plus uses base dir for backward compatibility
     default_emb = "Transformers/sentence-transformers/all-MiniLM-L6-v2"
-    if embedding_model_name == default_emb:
+    default_llm = "qwen-plus"
+    if embedding_model_name == default_emb and llm_model_name == default_llm:
         save_dir = base_save_dir
     else:
-        emb_short_name = embedding_model_name.replace("/", "_")
-        save_dir = os.path.join(base_save_dir, emb_short_name)
+        llm_short = llm_model_name.split("/")[-1].replace(" ", "_")
+        emb_short = embedding_model_name.split("/")[-1].replace(" ", "_")
+        save_dir = os.path.join(base_save_dir, f"{llm_short}__{emb_short}")
     os.makedirs(save_dir, exist_ok=True)
 
     api_key = os.getenv("OPENAI_API_KEY") or os.getenv("DASHSCOPE_API_KEY")
@@ -222,7 +227,22 @@ def run_evaluation(data, sample_limit, max_rounds):
         "sample_limit": sample_limit,
         "llm": llm_model_name,
         "embedding": embedding_model_name,
+        "openie_cache": openie_cache,
     }
+
+    # Load pre-computed OpenIE cache and build text->openie_info lookup
+    openie_text_lookup = {}
+    if openie_cache:
+        logger.info(f"Using pre-computed OpenIE cache: {openie_cache}")
+        if not os.path.isfile(openie_cache):
+            raise FileNotFoundError(f"OpenIE cache not found: {openie_cache}")
+        from src.hipporag.utils.misc_utils import compute_mdhash_id
+        cache_data = json.load(open(openie_cache))
+        for doc in cache_data["docs"]:
+            # Cache has passage="title\ntext", match by "text" field (without title)
+            text_key = doc.get("text", doc["passage"])
+            openie_text_lookup[text_key] = doc
+        logger.info(f"Loaded {len(openie_text_lookup)} docs from OpenIE cache")
     output_path = os.path.join(save_dir, "comparison_results.json")
     all_results = []
 
@@ -234,6 +254,12 @@ def run_evaluation(data, sample_limit, max_rounds):
             logger.info(f"Resuming from {len(all_results)} completed samples")
         except Exception:
             all_results = []
+
+    # Per-sample timeout (seconds) to prevent hanging on API calls
+    SAMPLE_TIMEOUT = 300  # 5 minutes per sample
+
+    def _sample_timeout_handler(signum, frame):
+        raise TimeoutError("Sample timed out")
 
     total_start = time.time()
 
@@ -259,6 +285,10 @@ def run_evaluation(data, sample_limit, max_rounds):
 
         logger.info(f"[{idx+1}/{len(data)}] {question[:80]}...")
 
+        # Set per-sample timeout to prevent hanging on API calls
+        old_handler = signal.signal(signal.SIGALRM, _sample_timeout_handler)
+        signal.alarm(SAMPLE_TIMEOUT)
+
         try:
             hipporag = HippoRAG(
                 save_dir=per_sample_dir,
@@ -266,9 +296,57 @@ def run_evaluation(data, sample_limit, max_rounds):
                 embedding_model_name=embedding_model_name,
                 llm_base_url=aliyun_base_url,
             )
+            # Inject pre-computed OpenIE cache with correct chunk hashes
+            if openie_text_lookup:
+                os.makedirs(per_sample_dir, exist_ok=True)
+                cache_dest = hipporag.openie_results_path
+                if True:  # Always overwrite to ensure consistent OpenIE
+                    matched_docs = []
+                    for doc_text in docs:
+                        if doc_text in openie_text_lookup:
+                            cached = openie_text_lookup[doc_text]
+                            # Recompute idx using the actual text (no title prefix)
+                            # to match what HippoRAG's embedding_store will generate
+                            new_idx = compute_mdhash_id(doc_text, prefix="chunk-")
+                            matched_docs.append({
+                                "idx": new_idx,
+                                "passage": doc_text,
+                                "extracted_entities": cached["extracted_entities"],
+                                "extracted_triples": cached.get("extracted_triples", []),
+                            })
+                    if matched_docs:
+                        with open(cache_dest, "w") as f:
+                            json.dump({"docs": matched_docs}, f)
+                        logger.debug(f"  Injected {len(matched_docs)}/{len(docs)} cached OpenIE results")
             hipporag.index(docs=docs)
+        except TimeoutError:
+            logger.error(f"  Sample {idx} timed out during indexing")
+            signal.alarm(0)
+            signal.signal(signal.SIGALRM, old_handler)
+            all_results.append({
+                "idx": idx, "question": question, "gold_answer": answer,
+                "gold_aliases": answer_aliases,
+                "baseline_answer": "Error", "reasoning_answer": "Error",
+                "baseline_retrieval": {}, "reasoning_retrieval": {},
+                "baseline_qa": {}, "reasoning_qa": {},
+                "baseline_time": 0, "reasoning_time": 0, "error": "Timeout during indexing",
+            })
+            try:
+                del hipporag
+            except NameError:
+                pass
+            gc.collect()
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            except ImportError:
+                pass
+            continue
         except Exception as e:
             logger.error(f"  Index failed: {e}")
+            signal.alarm(0)
+            signal.signal(signal.SIGALRM, old_handler)
             all_results.append({
                 "idx": idx, "question": question, "gold_answer": answer,
                 "baseline_answer": "Error", "reasoning_answer": "Error",
@@ -276,6 +354,17 @@ def run_evaluation(data, sample_limit, max_rounds):
                 "baseline_qa": {}, "reasoning_qa": {},
                 "baseline_time": 0, "reasoning_time": 0, "error": str(e),
             })
+            try:
+                del hipporag
+            except NameError:
+                pass
+            gc.collect()
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            except ImportError:
+                pass
             continue
 
         # --- Baseline ---
@@ -289,12 +378,20 @@ def run_evaluation(data, sample_limit, max_rounds):
             baseline_answer = baseline[0][0].answer if baseline[0] else "Unknown"
             baseline_retrieval = baseline[3] if len(baseline) > 3 else {}
             baseline_qa = baseline[4] if len(baseline) > 4 else {}
+        except TimeoutError:
+            logger.error(f"  Baseline timed out for sample {idx}")
+            baseline_answer = "Error"
+            baseline_retrieval = {}
+            baseline_qa = {}
         except Exception as e:
             logger.error(f"  Baseline failed: {e}")
             baseline_answer = "Error"
             baseline_retrieval = {}
             baseline_qa = {}
         baseline_time = time.time() - t0
+
+        # Reset alarm for reasoning phase
+        signal.alarm(SAMPLE_TIMEOUT)
 
         # --- Reasoning ---
         t0 = time.time()
@@ -308,6 +405,11 @@ def run_evaluation(data, sample_limit, max_rounds):
             reasoning_answer = reasoning[0][0].answer if reasoning[0] else "Unknown"
             reasoning_retrieval = reasoning[3] if len(reasoning) > 3 else {}
             reasoning_qa = reasoning[4] if len(reasoning) > 4 else {}
+        except TimeoutError:
+            logger.error(f"  Reasoning timed out for sample {idx}")
+            reasoning_answer = "Error"
+            reasoning_retrieval = {}
+            reasoning_qa = {}
         except Exception as e:
             logger.error(f"  Reasoning failed: {e}")
             logger.error(traceback.format_exc())
@@ -315,6 +417,10 @@ def run_evaluation(data, sample_limit, max_rounds):
             reasoning_retrieval = {}
             reasoning_qa = {}
         reasoning_time = time.time() - t0
+
+        # Clear alarm
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, old_handler)
 
         result = {
             "idx": idx,
@@ -331,6 +437,16 @@ def run_evaluation(data, sample_limit, max_rounds):
             "reasoning_time": round(reasoning_time, 2),
         }
         all_results.append(result)
+
+        # Free GPU memory from this sample's HippoRAG instance
+        del hipporag
+        gc.collect()
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except ImportError:
+            pass
 
         # Quick EM check
         b_match = "Y" if check_em(baseline_answer, answer, answer_aliases) else "N"
@@ -484,6 +600,9 @@ def main():
     parser.add_argument("--sample_limit", type=int, default=200)
     parser.add_argument("--max_rounds", type=int, default=3)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--openie_cache", type=str, default=None,
+                        help="Path to pre-computed OpenIE results JSON (e.g., gpt-4o-mini). "
+                             "Skips LLM-based NER/triple extraction during indexing.")
     args = parser.parse_args()
 
     random.seed(args.seed)
@@ -492,7 +611,7 @@ def main():
     data = load_musique_data(args.data_path)
     logger.info(f"Loaded {len(data)} samples")
 
-    run_evaluation(data, args.sample_limit, args.max_rounds)
+    run_evaluation(data, args.sample_limit, args.max_rounds, openie_cache=args.openie_cache)
 
 
 if __name__ == "__main__":
