@@ -239,8 +239,13 @@ def run_evaluation(data, sample_limit, max_rounds, openie_cache=None):
         from src.hipporag.utils.misc_utils import compute_mdhash_id
         cache_data = json.load(open(openie_cache))
         for doc in cache_data["docs"]:
-            # Cache has passage="title\ntext", match by "text" field (without title)
-            text_key = doc.get("text", doc["passage"])
+            # Cache may have "text" field (gpt-4o-mini) or only "passage" (qwen-plus)
+            # passage format is "title\ntext", so extract text after first newline
+            if "text" in doc:
+                text_key = doc["text"]
+            else:
+                parts = doc["passage"].split("\n", 1)
+                text_key = parts[1] if len(parts) > 1 else doc["passage"]
             openie_text_lookup[text_key] = doc
         logger.info(f"Loaded {len(openie_text_lookup)} docs from OpenIE cache")
     output_path = os.path.join(save_dir, "comparison_results.json")
