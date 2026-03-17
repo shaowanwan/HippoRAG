@@ -29,19 +29,28 @@ class TransformersEmbeddingModel(BaseEmbeddingModel):
             get_query_instruction('query_to_passage')
         ])
 
-    def encode(self, texts: List[str]) -> None:
+    def encode(self, texts: List[str], prompt: str = None) -> None:
         try:
-            response = self.model.encode(texts, batch_size=self.batch_size)
+            encode_kwargs = {"batch_size": self.batch_size}
+            if prompt:
+                encode_kwargs["prompt"] = prompt
+            response = self.model.encode(texts, **encode_kwargs)
         except Exception as err:
             raise Exception(f"An error occurred: {err}")
         return np.array(response)
 
     def batch_encode(self, texts: List[str], **kwargs) -> None:
+        # Build instruction prompt for instruction-tuned models (e.g. GTE-Qwen2-7B-instruct)
+        prompt = None
+        instruction = kwargs.get("instruction", "")
+        if instruction:
+            prompt = f"Instruct: {instruction}\nQuery: "
+
         if len(texts) < self.batch_size:
-            return self.encode(texts)
-        
+            return self.encode(texts, prompt=prompt)
+
         results = []
         batch_indexes = list(range(0, len(texts), self.batch_size))
         for i in tqdm(batch_indexes, desc="Batch Encoding"):
-            results.append(self.encode(texts[i:i + self.batch_size]))
+            results.append(self.encode(texts[i:i + self.batch_size], prompt=prompt))
         return np.concatenate(results)
