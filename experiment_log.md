@@ -570,3 +570,49 @@ Query: "What company succeeded the owner of Empire Sports Network?"
 | **13B** | **+ One-shot prompt** | **+12.0%** | **+10.4%** | **+20.6%** |
 | 13C | + Top5 full docs | +10.5% | +11.5% | +21.3% |
 | 13D | + Both combined | +8.0% | +9.0% | +19.0% |
+
+---
+
+## Exp 14: Full MuSiQue Dev Set — 1000 Samples (2026-03-16)
+- **Branch**: feature/graph-reshape (commit `3cd9287`)
+- **Method**: Exp 12 + top5 full docs (Exp 13C config)
+- **Samples**: 1000 (full dev set)
+- **Max rounds**: 3
+
+### Results
+| Metric | Baseline | Reasoning | Delta |
+|--------|----------|-----------|-------|
+| EM     | 0.3900   | 0.4900    | **+10.0%** |
+| F1     | 0.4936   | 0.6055    | **+11.2%** |
+| R@1    | 0.2534   | 0.3257    | +7.2%  |
+| R@2    | 0.4100   | 0.5656    | +15.6% |
+| R@5    | 0.6852   | 0.8917    | **+20.7%** |
+| R@10   | 0.8610   | 0.9575    | +9.7%  |
+
+### Statistics
+- Avg reasoning rounds: 1.81
+- Total samples: 1000
+
+### By Hop Count
+| Hops | N   | B_EM  | R_EM  | Δ_EM    | B_F1  | R_F1  | Δ_F1    | B_R@5 | R_R@5 | Δ_R@5   |
+|------|-----|-------|-------|---------|-------|-------|---------|-------|-------|---------|
+| 2    | 518 | 0.456 | 0.550 | +9.5%   | 0.546 | 0.660 | +11.5%  | 0.775 | 0.945 | +17.0%  |
+| 3    | 316 | 0.329 | 0.437 | +10.8%  | 0.442 | 0.551 | +10.8%  | 0.627 | 0.856 | +23.0%  |
+| 4    | 166 | 0.295 | 0.398 | +10.2%  | 0.378 | 0.469 | +9.1%   | 0.514 | 0.790 | +27.6%  |
+
+### Key Findings
+- **Results are stable**: 1000-sample results match 200-sample results closely (EM +10.0% vs +10.5%)
+- **All hop counts benefit**: Unlike 200-sample where 4-hop EM was +0%, 1000-sample shows +10.2% (200-sample had only 39 4-hop queries → high variance)
+- **R@5 scales with hops**: 2-hop +17% → 3-hop +23% → 4-hop +27.6% — more hops = more benefit from reasoning-guided retrieval
+- **3-hop benefits most in EM**: +10.8%, slightly better than 2-hop (+9.5%) and 4-hop (+10.2%)
+
+### Comparison with All Experiments (200-sample unless noted)
+| Exp | Method | Samples | EM Δ | F1 Δ | R@5 Δ |
+|-----|--------|---------|------|------|-------|
+| 1 | Query rewrite only | 200 | +4.0% | +5.1% | +11.2% |
+| 4 | Combined full pipeline | 200 | +8.0% | +6.7% | +13.4% |
+| 8 | + Degree-adaptive | 200 | +10.3% | +9.9% | +14.8% |
+| 11 | + PPR + LLM reranker | 200 | +10.0% | +10.8% | +22.0% |
+| 12 | 5-hop + dual RRF | 200 | +10.0% | +9.1% | +20.0% |
+| 13B | + One-shot prompt | 200 | +12.0% | +10.4% | +20.6% |
+| **14** | **Full dev set (top5 full)** | **1000** | **+10.0%** | **+11.2%** | **+20.7%** |
