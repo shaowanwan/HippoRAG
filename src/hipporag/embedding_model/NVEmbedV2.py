@@ -4,6 +4,11 @@ from typing import List, Optional
 import numpy as np
 import torch
 from tqdm import tqdm
+try:
+    from nv_embed_v2 import NVEmbedModel as _NVEmbedModel
+    _USE_FIXED_FORK = True
+except ImportError:
+    _USE_FIXED_FORK = False
 from transformers import AutoModel
 
 from ..utils.config_utils import BaseConfig
@@ -27,7 +32,10 @@ class NVEmbedV2EmbeddingModel(BaseEmbeddingModel):
         # Initializing the embedding model
         logger.debug(f"Initializing {self.__class__.__name__}'s embedding model with params: {self.embedding_config.model_init_params}")
 
-        self.embedding_model = AutoModel.from_pretrained(**self.embedding_config.model_init_params)
+        if _USE_FIXED_FORK:
+            self.embedding_model = _NVEmbedModel.from_pretrained(self.embedding_model_name)
+        else:
+            self.embedding_model = AutoModel.from_pretrained(**self.embedding_config.model_init_params)
         self.embedding_dim = self.embedding_model.config.hidden_size
 
     def _init_embedding_config(self) -> None:
