@@ -23,7 +23,11 @@
 - Every experiment MUST save full reasoning trajectories per query per round: analysis, rewritten_query, discovered_entities, should_stop, retrieved doc IDs
 - Save experiment results and setup to `experiment_log.md` after each run
 - Output files should be named/organized by parameter config (e.g., `comparison_results_top5_oneshot.json`), so different configs don't overwrite each other. Same-config reruns can overwrite.
+- **汇报实验指标时至少包含三个：EM, F1, Recall@5**（不要只报EM）
 - **每天实验改的重要地方和实验结果（EM, F1, Recall, efficiency）都要记录到Obsidian笔记里**
+
+## Server Jobs
+- 提交新 job 前，主动删除之前失败 job 产生的无效样本结果文件，避免 resume 时加载坏数据
 
 ## Code Changes
 - Modifying HippoRAG's original source code (anything outside `src/hipporag/reasoning/`) is allowed, but MUST notify the user before doing so
@@ -33,3 +37,10 @@
 - Use `.venv/bin/python` (not system python)
 - LLM: qwen-plus via Aliyun DashScope API
 - Embedding: all-MiniLM-L6-v2 (local)
+
+## LIACS Server
+- **SSH**: `ssh calcium`（通过跳板机 `ssh.liacs.nl` → `calcium.liacs.nl`，配置在 `~/.ssh/config`）
+- **不要直接连** `liacs.leidenuniv.nl` 或 `calcium.liacs.nl`，会超时
+- 用户: `s4303873`
+- 工作目录: `/data/s4303873/HippoRAG`
+- Conda 环境: `hipporag`（`source /software/anaconda3/etc/profile.d/conda.sh && conda activate hipporag`）
