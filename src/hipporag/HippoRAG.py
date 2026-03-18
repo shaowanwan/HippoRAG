@@ -47,7 +47,8 @@ class HippoRAG:
                  embedding_model_name=None,
                  embedding_base_url=None,
                  azure_endpoint=None,
-                 azure_embedding_endpoint=None):
+                 azure_embedding_endpoint=None,
+                 embedding_model=None):
         """
         Initializes an instance of the class and its related components.
 
@@ -134,7 +135,9 @@ class HippoRAG:
 
         self.graph = self.initialize_graph()
 
-        if self.global_config.openie_mode == 'offline':
+        if embedding_model is not None:
+            self.embedding_model = embedding_model
+        elif self.global_config.openie_mode == 'offline':
             self.embedding_model = None
         else:
             self.embedding_model: BaseEmbeddingModel = _get_embedding_model_class(

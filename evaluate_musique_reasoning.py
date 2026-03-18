@@ -189,6 +189,7 @@ def save_results(output_path, config, all_results):
 def run_evaluation(data, sample_limit, max_rounds, openie_cache=None):
     # Import inside function to avoid multiprocessing spawn issue on macOS
     from src.hipporag import HippoRAG
+    from src.hipporag.embedding_model import _get_embedding_model_class
     import shutil
 
     if sample_limit and sample_limit < len(data):
@@ -260,6 +261,14 @@ def run_evaluation(data, sample_limit, max_rounds, openie_cache=None):
         except Exception:
             all_results = []
 
+    # Pre-load embedding model once to avoid reloading per sample (~45s each for NV-Embed-v2)
+    logger.info(f"Pre-loading embedding model: {embedding_model_name}")
+    t_emb = time.time()
+    shared_embedding_model = _get_embedding_model_class(
+        embedding_model_name=embedding_model_name
+    )(embedding_model_name=embedding_model_name)
+    logger.info(f"Embedding model loaded in {time.time() - t_emb:.1f}s")
+
     # Per-sample timeout (seconds) to prevent hanging on API calls
     SAMPLE_TIMEOUT = 300  # 5 minutes per sample
 
@@ -300,6 +309,7 @@ def run_evaluation(data, sample_limit, max_rounds, openie_cache=None):
                 llm_model_name=llm_model_name,
                 embedding_model_name=embedding_model_name,
                 llm_base_url=aliyun_base_url,
+                embedding_model=shared_embedding_model,
             )
             # Inject pre-computed OpenIE cache with correct chunk hashes
             if openie_text_lookup:
@@ -341,12 +351,6 @@ def run_evaluation(data, sample_limit, max_rounds, openie_cache=None):
             except NameError:
                 pass
             gc.collect()
-            try:
-                import torch
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
-            except ImportError:
-                pass
             continue
         except Exception as e:
             logger.error(f"  Index failed: {e}")
@@ -364,12 +368,6 @@ def run_evaluation(data, sample_limit, max_rounds, openie_cache=None):
             except NameError:
                 pass
             gc.collect()
-            try:
-                import torch
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
-            except ImportError:
-                pass
             continue
 
         # --- Baseline ---
@@ -443,15 +441,9 @@ def run_evaluation(data, sample_limit, max_rounds, openie_cache=None):
         }
         all_results.append(result)
 
-        # Free GPU memory from this sample's HippoRAG instance
+        # Free per-sample data (but keep shared embedding model)
         del hipporag
         gc.collect()
-        try:
-            import torch
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-        except ImportError:
-            pass
 
         # Quick EM check
         b_match = "Y" if check_em(baseline_answer, answer, answer_aliases) else "N"
