@@ -195,6 +195,8 @@ def run_evaluation(data, sample_limit, max_rounds, openie_cache=None):
     if sample_limit and sample_limit < len(data):
         data = data[:sample_limit]
 
+    # Shared sample directory for graph building — all experiments use the same graphs
+    shared_graph_dir = "outputs/musique_shared"
     base_save_dir = "outputs/musique_reasoning_eval"
     llm_model_name = os.getenv("LLM_MODEL_NAME", "qwen-plus")
     embedding_model_name = os.getenv(
@@ -214,6 +216,17 @@ def run_evaluation(data, sample_limit, max_rounds, openie_cache=None):
         llm_short = llm_model_name.split("/")[-1].replace(" ", "_")
         emb_short = embedding_model_name.split("/")[-1].replace(" ", "_")
         save_dir = os.path.join(base_save_dir, f"{llm_short}__{emb_short}")
+
+    # Append non-default hyperparameter suffixes to save_dir
+    import src.hipporag.reasoning.controller as _rc
+    if getattr(_rc, 'MINI_PPR_THRESHOLD', 0.0001) != 0.0001:
+        save_dir = save_dir + f"__ppr_th_{_rc.MINI_PPR_THRESHOLD}"
+    _topk = getattr(_rc, 'MINI_PPR_TOPK', None)
+    if _topk:
+        save_dir = save_dir + f"__topk_{_topk}"
+    if getattr(_rc, 'EXPANSION_RRF_WEIGHT', 1.0) != 1.0 or getattr(_rc, 'PIPELINE_RRF_WEIGHT', 0.5) != 0.5:
+        save_dir = save_dir + f"__rrf_{_rc.PIPELINE_RRF_WEIGHT}_{_rc.EXPANSION_RRF_WEIGHT}"
+
     os.makedirs(save_dir, exist_ok=True)
 
     api_key = os.getenv("OPENAI_API_KEY") or os.getenv("DASHSCOPE_API_KEY")
@@ -295,7 +308,8 @@ def run_evaluation(data, sample_limit, max_rounds, openie_cache=None):
         ]
         gold_answers = [answer] + answer_aliases
 
-        per_sample_dir = os.path.join(save_dir, f"sample_{idx:06d}")
+        # Use shared directory for graph building (all experiments share the same graphs)
+        per_sample_dir = os.path.join(shared_graph_dir, f"sample_{idx:06d}")
 
         logger.info(f"[{idx+1}/{len(data)}] {question[:80]}...")
 
@@ -333,6 +347,12 @@ def run_evaluation(data, sample_limit, max_rounds, openie_cache=None):
                         with open(cache_dest, "w") as f:
                             json.dump({"docs": matched_docs}, f)
                         logger.debug(f"  Injected {len(matched_docs)}/{len(docs)} cached OpenIE results")
+                        # Invalidate stale graph.pickle if OpenIE cache is newer
+                        graph_pickle = hipporag._graph_pickle_filename
+                        if os.path.exists(graph_pickle):
+                            if os.path.getmtime(cache_dest) > os.path.getmtime(graph_pickle):
+                                os.remove(graph_pickle)
+                                logger.debug(f"  Removed stale graph.pickle (older than OpenIE cache)")
             hipporag.index(docs=docs)
         except TimeoutError:
             logger.error(f"  Sample {idx} timed out during indexing")
@@ -597,13 +617,23 @@ def main():
     parser.add_argument("--sample_limit", type=int, default=200)
     parser.add_argument("--max_rounds", type=int, default=3)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--openie_cache", type=str, default=None,
+    parser.add_argument("--openie_cache", type=str, default="outputs/musique/openie_results_ner_qwen-plus.json",
                         help="Path to pre-computed OpenIE results JSON (e.g., gpt-4o-mini). "
                              "Skips LLM-based NER/triple extraction during indexing.")
+    parser.add_argument("--mini_ppr_threshold", type=float, default=None,
+                        help="Override MINI_PPR_THRESHOLD in reasoning controller")
     args = parser.parse_args()
+
+    # Override mini PPR threshold if specified
+    if args.mini_ppr_threshold is not None:
+        import src.hipporag.reasoning.controller as _rc
+        _rc.MINI_PPR_THRESHOLD = args.mini_ppr_threshold
+        logger.info(f"MINI_PPR_THRESHOLD overridden to {args.mini_ppr_threshold}")
 
     random.seed(args.seed)
     np.random.seed(args.seed)
+    import torch
+    torch.manual_seed(args.seed)
 
     data = load_musique_data(args.data_path)
     logger.info(f"Loaded {len(data)} samples")

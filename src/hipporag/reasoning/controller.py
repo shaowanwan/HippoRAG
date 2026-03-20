@@ -1,5 +1,6 @@
 import logging
 import math
+import os
 import time
 from typing import Dict, List, Optional, Tuple
 
@@ -29,8 +30,9 @@ LP_BOOST = 1.5
 # Mini-PPR threshold for bridge edge selection
 MINI_PPR_THRESHOLD = 0.0001
 
-# Pipeline RRF weight (expansion PPR RRF = 1.0)
-PIPELINE_RRF_WEIGHT = 0.5
+# Pipeline RRF weight (expansion PPR RRF = EXPANSION_RRF_WEIGHT)
+PIPELINE_RRF_WEIGHT = float(os.environ.get("PIPELINE_RRF_WEIGHT", "0.5"))
+EXPANSION_RRF_WEIGHT = float(os.environ.get("EXPANSION_RRF_WEIGHT", "1.0"))
 
 
 
@@ -492,9 +494,9 @@ class ReasoningController:
                     graph=working_graph,
                 )
 
-                # Expansion PPR: convert to RRF rank and accumulate (weight 1.0)
+                # Expansion PPR: convert to RRF rank and accumulate
                 for rank, doc_id in enumerate(boosted_doc_ids):
-                    rrf_scores[doc_id] += round_weight / (rrf_k + rank + 1)
+                    rrf_scores[doc_id] += EXPANSION_RRF_WEIGHT * round_weight / (rrf_k + rank + 1)
 
                 logger.info(
                     f"  PPR-filtered expansion: {len(all_discovered)} entities, "

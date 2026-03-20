@@ -23,6 +23,7 @@ import traceback
 import gc
 import re as _re
 
+import random
 import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
@@ -249,6 +250,12 @@ def main():
     (HippoRAG, QuerySolution, compute_mdhash_id, _get_embedding_model_class,
      PromptTemplateManager, RetrievalRecall, QAExactMatch, QAF1Score) = _lazy_imports()
 
+    # Set random seeds for reproducibility
+    random.seed(42)
+    np.random.seed(42)
+    import torch
+    torch.manual_seed(42)
+
     data = load_musique_data(args.data_path)
     if args.sample_limit and args.sample_limit < len(data):
         data = data[:args.sample_limit]
@@ -271,6 +278,8 @@ def main():
     else:
         os.environ["OPENAI_API_KEY"] = "sk-396199ed7af84eff8a0cf7a71b797601"
 
+    # Shared sample directory for graph building — all experiments use the same graphs
+    shared_graph_dir = "outputs/musique_shared"
     save_dir = "outputs/musique_ircot_eval"
     os.makedirs(save_dir, exist_ok=True)
 
@@ -339,7 +348,8 @@ def main():
         ]
         gold_answers = [answer] + answer_aliases
 
-        per_sample_dir = os.path.join(save_dir, f"sample_{idx:06d}")
+        # Use shared directory for graph building (all experiments share the same graphs)
+        per_sample_dir = os.path.join(shared_graph_dir, f"sample_{idx:06d}")
         logger.info(f"[{idx+1}/{len(data)}] {question[:80]}...")
 
         old_handler = signal.signal(signal.SIGALRM, _timeout_handler)
@@ -371,6 +381,12 @@ def main():
                 if matched_docs:
                     with open(cache_dest, "w") as f:
                         json.dump({"docs": matched_docs}, f)
+                    # Invalidate stale graph.pickle if OpenIE cache is newer
+                    graph_pickle = hipporag._graph_pickle_filename
+                    if os.path.exists(graph_pickle):
+                        if os.path.getmtime(cache_dest) > os.path.getmtime(graph_pickle):
+                            os.remove(graph_pickle)
+                            logger.debug(f"  Removed stale graph.pickle (older than OpenIE cache)")
             hipporag.index(docs=docs)
         except TimeoutError:
             logger.error(f"  Sample {idx} timed out during indexing")

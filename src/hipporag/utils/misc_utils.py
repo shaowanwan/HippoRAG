@@ -90,7 +90,7 @@ def extract_entity_nodes(chunk_triples: List[List[Triple]]) -> (List[str], List[
                 triple_entities.update([t[0], t[2]])
             else:
                 logger.warning(f"During graph construction, invalid triple is found: {t}")
-        chunk_triple_entities.append(list(triple_entities))
+        chunk_triple_entities.append(sorted(triple_entities))
     graph_nodes = list(np.unique([ent for ents in chunk_triple_entities for ent in ents]))
     return graph_nodes, chunk_triple_entities
 
@@ -98,7 +98,7 @@ def flatten_facts(chunk_triples: List[Triple]) -> List[Triple]:
     graph_triples = []  # a list of unique relation triple (in tuple) from all chunks
     for triples in chunk_triples:
         graph_triples.extend([tuple(t) for t in triples])
-    graph_triples = list(set(graph_triples))
+    graph_triples = sorted(set(graph_triples))
     return graph_triples
 
 def min_max_normalize(x):
