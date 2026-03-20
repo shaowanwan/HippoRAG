@@ -278,8 +278,9 @@ def main():
     else:
         os.environ["OPENAI_API_KEY"] = "sk-396199ed7af84eff8a0cf7a71b797601"
 
-    # Shared sample directory for graph building — all experiments use the same graphs
-    shared_graph_dir = "outputs/musique_shared"
+    # Shared sample directory for graph building — keyed by embedding model
+    emb_key = embedding_model_name.split("/")[-1].replace(" ", "_")
+    shared_graph_dir = os.path.join("outputs", f"musique_shared_{emb_key}")
     save_dir = "outputs/musique_ircot_eval"
     os.makedirs(save_dir, exist_ok=True)
 

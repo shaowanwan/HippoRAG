@@ -195,13 +195,16 @@ def run_evaluation(data, sample_limit, max_rounds, openie_cache=None):
     if sample_limit and sample_limit < len(data):
         data = data[:sample_limit]
 
-    # Shared sample directory for graph building — all experiments use the same graphs
-    shared_graph_dir = "outputs/musique_shared"
     base_save_dir = "outputs/musique_reasoning_eval"
     llm_model_name = os.getenv("LLM_MODEL_NAME", "qwen-plus")
     embedding_model_name = os.getenv(
         "EMBEDDING_MODEL_NAME", "Transformers/sentence-transformers/all-MiniLM-L6-v2"
     )
+
+    # Shared sample directory for graph building — keyed by embedding model
+    # (graph structure depends on embedding via synonymy edges, not on LLM)
+    emb_key = embedding_model_name.split("/")[-1].replace(" ", "_")
+    shared_graph_dir = os.path.join("outputs", f"musique_shared_{emb_key}")
     aliyun_base_url = os.getenv(
         "LLM_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"
     )
