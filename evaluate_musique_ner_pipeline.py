@@ -917,6 +917,7 @@ def iterative_retrieve(index, question: str, llm_client, max_rounds: int = 3,
     rrf_scores = np.zeros(num_docs)
     current_query = question
     reasoning_traces = []
+    round_trajectories = []  # full trajectory per round for debugging
     all_discovered = {}  # name -> vertex_id, accumulated across rounds
     base_node_weights = None
     round0_top_doc_ids = None
@@ -1031,8 +1032,21 @@ def iterative_retrieve(index, question: str, llm_client, max_rounds: int = 3,
 
         reasoning_traces.append(reasoning_output.get("analysis", ""))
 
+        # Save full trajectory for this round
+        round_traj = {
+            "round": round_i,
+            "query": current_query,
+            "analysis": reasoning_output.get("analysis", ""),
+            "rewritten_query": reasoning_output.get("rewritten_query", ""),
+            "discovered_entities": reasoning_output.get("discovered_entities", []),
+            "should_stop": reasoning_output.get("should_stop", False),
+            "resolved_entities": {},
+            "top_doc_ids": [int(d) for d in final_sorted_ids[:10]],
+        }
+
         if reasoning_output.get("should_stop", False):
             logger.info(f"  Reasoning stop at round {round_i}")
+            round_trajectories.append(round_traj)
             break
 
         # Query rewrite
@@ -1048,6 +1062,9 @@ def iterative_retrieve(index, question: str, llm_client, max_rounds: int = 3,
             resolved = _resolve_entities_in_graph(index, discovered_entities)
             all_discovered.update(resolved)
             logger.info(f"  Total resolved entities: {len(all_discovered)}")
+            round_traj["resolved_entities"] = {name: int(vid) for name, vid in resolved.items()}
+
+        round_trajectories.append(round_traj)
 
     # Final ranking from RRF
     final_sorted_ids = np.argsort(rrf_scores)[::-1]
@@ -1060,7 +1077,7 @@ def iterative_retrieve(index, question: str, llm_client, max_rounds: int = 3,
             # Replace top docs with reranked, keep rest
             retrieved_docs = reranked + retrieved_docs[len(reranked):]
 
-    return retrieved_docs, reasoning_traces
+    return retrieved_docs, reasoning_traces, round_trajectories
 
 
 def _compute_base_node_weights(index, query: str) -> np.ndarray:
@@ -1271,19 +1288,29 @@ def ircot_retrieve(index, question: str, llm_client, max_rounds: int = 3):
 
 
 class SimpleLLM:
-    """Simple OpenAI-compatible LLM client."""
-    def __init__(self, model_name, base_url):
+    """Simple OpenAI-compatible LLM client with retry."""
+    def __init__(self, model_name, base_url, max_retries=3, retry_delay=10):
         from openai import OpenAI
         self.model_name = model_name
-        self.client = OpenAI(base_url=base_url)
+        self.client = OpenAI(base_url=base_url, timeout=60)
+        self.max_retries = max_retries
+        self.retry_delay = retry_delay
 
     def infer(self, messages):
-        resp = self.client.chat.completions.create(
-            model=self.model_name,
-            messages=messages,
-            temperature=0,
-        )
-        return resp.choices[0].message.content
+        for attempt in range(self.max_retries):
+            try:
+                resp = self.client.chat.completions.create(
+                    model=self.model_name,
+                    messages=messages,
+                    temperature=0,
+                )
+                return resp.choices[0].message.content
+            except Exception as e:
+                if attempt < self.max_retries - 1:
+                    logger.warning(f"  LLM API error (attempt {attempt+1}/{self.max_retries}): {e}, retrying in {self.retry_delay}s...")
+                    time.sleep(self.retry_delay)
+                else:
+                    raise
 
 
 def run_evaluation(args):
@@ -1370,10 +1397,26 @@ def run_evaluation(args):
         output_tag = ""
     output_path = os.path.join(save_dir, f"comparison_results{output_tag}.json")
 
+    # Load previous results for retry mode
+    prev_results = {}
+    if getattr(args, 'retry_from', None) and os.path.exists(args.retry_from):
+        prev_data = json.load(open(args.retry_from))
+        for r in prev_data.get("results", []):
+            if r.get("ner_answer") != "Error":
+                prev_results[r["idx"]] = r
+        logger.info(f"Retry mode: loaded {len(prev_results)} successful results from {args.retry_from}")
+        failed_idxs = [r["idx"] for r in prev_data.get("results", []) if r.get("ner_answer") == "Error"]
+        logger.info(f"  Will rerun {len(failed_idxs)} failed samples: {failed_idxs}")
+
     all_results = []
     total_start = time.time()
 
     for idx, sample in enumerate(data):
+        # Skip successful samples in retry mode
+        if idx in prev_results:
+            all_results.append(prev_results[idx])
+            continue
+
         question = sample.get("question", "")
         paragraphs = sample.get("paragraphs", [])
         answer = sample.get("answer", "")
@@ -1408,13 +1451,14 @@ def run_evaluation(args):
 
             # Step 3: Retrieve
             reasoning_traces = []
+            round_trajectories = []
             if mode == 'ircot':
                 # IRCoT: iterative retrieval with chain-of-thought
                 retrieved_docs, reasoning_traces = ircot_retrieve(
                     index, question, llm_client, max_rounds=args.max_rounds)
             elif args.max_rounds > 1:
                 # Graph-reshape reasoning: entity discovery + seed expansion + RRF
-                retrieved_docs, reasoning_traces = iterative_retrieve(
+                retrieved_docs, reasoning_traces, round_trajectories = iterative_retrieve(
                     index, question, llm_client, max_rounds=args.max_rounds)
             else:
                 # Single-round base retrieval
@@ -1454,6 +1498,7 @@ def run_evaluation(args):
             "ner_f1": round(f1_score, 4),
             "ner_recall": {"R@1": r1, "R@2": r2, "R@5": r5, "R@10": r10},
             "reasoning_traces": reasoning_traces,
+            "round_trajectories": round_trajectories,
             "n_entities": len(index.entity_keys) if hasattr(index, 'entity_keys') else 0,
             "n_sentences": len(index.sentences) if hasattr(index, 'sentences') else 0,
             "graph_nodes": index.graph.vcount() if index.graph else 0,
@@ -1540,6 +1585,8 @@ def main():
     parser.add_argument("--mode", type=str, default="base",
                         choices=["base", "reasoning", "ircot"],
                         help="Reasoning mode: base, reasoning (graph-reshape), ircot")
+    parser.add_argument("--retry_from", type=str, default=None,
+                        help="Path to previous results JSON. Rerun only failed samples (ner_answer='Error') and keep successful ones.")
     args = parser.parse_args()
     # For reasoning/ircot, ensure max_rounds > 1
     if args.mode in ("reasoning", "ircot") and args.max_rounds <= 1:

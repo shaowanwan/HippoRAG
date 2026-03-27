@@ -220,6 +220,32 @@ class ReasoningController:
                         return pairs
         return pairs
 
+    def _collect_hop_subgraph_vids(self, core_vids: List[int], hops: int = 5) -> List[int]:
+        """Collect k-hop subgraph vertices from core nodes on the full graph."""
+        hip = self.hipporag
+        graph = hip.graph
+        subgraph_vids = set(core_vids)
+        for _ in range(hops):
+            frontier = set()
+            for vid in subgraph_vids:
+                for n in graph.neighbors(vid):
+                    frontier.add(n)
+            subgraph_vids |= frontier
+        return sorted(subgraph_vids)
+
+    def _build_masked_graph(self, subgraph_vids: List[int]):
+        """Return a graph with only edges inside subgraph_vids (vertices kept)."""
+        hip = self.hipporag
+        g = hip.graph.copy()
+        keep = set(subgraph_vids)
+        edges_to_delete = []
+        for e in g.es:
+            if e.source not in keep or e.target not in keep:
+                edges_to_delete.append(e.index)
+        if edges_to_delete:
+            g.delete_edges(edges_to_delete)
+        return g
+
     def _find_important_edges(
         self,
         discovered_vertex_ids: Dict[str, int],
@@ -311,6 +337,7 @@ class ReasoningController:
         discovered_vertex_ids: Dict[str, int],
         existing_seed_vertex_ids: List[int],
         round0_top_doc_ids: List[int] = None,
+        graph=None,
     ) -> List[Tuple[int, int, float]]:
         """Run mini-PPR from all bridge entities together on local subgraph.
 
@@ -320,7 +347,7 @@ class ReasoningController:
         Returns list of (bridge_vid, seed_vid, ppr_score) for selected connections.
         """
         hip = self.hipporag
-        graph = hip.graph
+        graph = graph if graph is not None else hip.graph
         passage_idx_set = set(hip.passage_node_idxs)
 
         # Build subgraph from round 0 top docs' entities + bridge + seeds
@@ -390,7 +417,11 @@ class ReasoningController:
 
     # ── Retrieval ──────────────────────────────────────────────────────
 
-    def _retrieve_single_query(self, query: str) -> Tuple[np.ndarray, np.ndarray, Optional[np.ndarray]]:
+    def _retrieve_single_query(
+        self,
+        query: str,
+        working_graph=None,
+    ) -> Tuple[np.ndarray, np.ndarray, Optional[np.ndarray]]:
         """Run full HippoRAG retrieval for a single query.
 
         Returns:
@@ -415,6 +446,7 @@ class ReasoningController:
                 top_k_facts=top_k_facts,
                 top_k_fact_indices=top_k_fact_indices,
                 passage_node_weight=hip.global_config.passage_node_weight,
+                working_graph=working_graph,
                 return_node_weights=True,
             )
             return sorted_doc_ids, sorted_doc_scores, node_weights
@@ -435,6 +467,7 @@ class ReasoningController:
         all_discovered = {}  # name -> vertex_id, accumulated across rounds
         doc_first_round = {}  # doc_id -> first round it appeared in top-K
         round0_top_doc_ids = None  # top doc IDs from round 0
+        overlay_edges = []  # accumulated bridge edges across rounds
 
         for round_i in range(self.max_rounds):
             state.round_idx = round_i
@@ -442,12 +475,13 @@ class ReasoningController:
 
             logger.info(f"  Round {round_i}: query='{state.current_query[:60]}...'")
 
-            # Step 1: Full retrieval with current query
-            sorted_doc_ids, sorted_doc_scores, node_weights = self._retrieve_single_query(state.current_query)
+            # Step 1: Full pipeline retrieval on full graph (seeds from fact/sentence matching)
+            sorted_doc_ids, sorted_doc_scores, node_weights = self._retrieve_single_query(
+                state.current_query,
+            )
             if node_weights is not None:
                 base_node_weights = node_weights
 
-            # Save round 0 top docs for subgraph construction
             if round_i == 0:
                 round0_top_doc_ids = [int(d) for d in sorted_doc_ids[:20]]
 
@@ -456,36 +490,42 @@ class ReasoningController:
             for rank, doc_id in enumerate(sorted_doc_ids):
                 rrf_scores[doc_id] += PIPELINE_RRF_WEIGHT * round_weight / (rrf_k + rank + 1)
 
-            # Step 3: If we have discovered entities from previous rounds, run expanded PPR
+            # Step 3: If we have discovered entities from previous rounds, run expansion PPR on full graph
             if all_discovered and base_node_weights is not None:
                 existing_seeds = self._get_existing_seed_ids(base_node_weights)
 
-                # Mini-PPR filtered bridge edges
+                # Mini-PPR on full graph to select bridge edges
                 ppr_connections = self._mini_ppr_select_seeds(
                     discovered_vertex_ids=all_discovered,
                     existing_seed_vertex_ids=existing_seeds,
                     round0_top_doc_ids=round0_top_doc_ids,
+                    graph=hip.graph,
                 )
 
+                # Build expansion weights: pipeline seeds + bridge entity seeds
                 modified_weights = base_node_weights.copy()
                 for name, vid in all_discovered.items():
                     modified_weights[vid] += self._degree_adaptive_weight(vid, DEFAULT_ENTITY_SEED_WEIGHT)
 
-                overlay = GraphOverlay(self.hipporag.graph)
-                # Only add edges for PPR-selected bridge→seed pairs
+                # Build overlay on full graph with accumulated bridge edges
+                overlay = GraphOverlay(hip.graph)
                 selected_pairs = set()
                 for d_vid, s_vid, score in ppr_connections:
                     bridge_weight = self._degree_adaptive_weight(d_vid, 1.0)
                     overlay.add_reasoning_edge(d_vid, s_vid, bridge_weight)
                     selected_pairs.add((d_vid, s_vid))
 
-                # Inter-discovered edges (always connect)
+                # Inter-discovered edges
                 d_list = list(all_discovered.values())
                 for i, v1 in enumerate(d_list):
                     for v2 in d_list[i+1:]:
                         w = max(self._degree_adaptive_weight(v1, 1.0),
                                 self._degree_adaptive_weight(v2, 1.0))
                         overlay.add_reasoning_edge(v1, v2, w)
+
+                # Also add edges from previous rounds
+                for edge in overlay_edges:
+                    overlay.add_reasoning_edge(edge[0], edge[1], edge[2])
 
                 working_graph = overlay.get_working_graph() if overlay else None
                 boosted_doc_ids, boosted_doc_scores = hip.run_ppr(
@@ -494,13 +534,22 @@ class ReasoningController:
                     graph=working_graph,
                 )
 
-                # Expansion PPR: convert to RRF rank and accumulate
+                # Save new edges for next round
+                for d_vid, s_vid, score in ppr_connections:
+                    overlay_edges.append((d_vid, s_vid, self._degree_adaptive_weight(d_vid, 1.0)))
+                for i, v1 in enumerate(d_list):
+                    for v2 in d_list[i+1:]:
+                        w = max(self._degree_adaptive_weight(v1, 1.0),
+                                self._degree_adaptive_weight(v2, 1.0))
+                        overlay_edges.append((v1, v2, w))
+
+                # Expansion RRF accumulate
                 for rank, doc_id in enumerate(boosted_doc_ids):
                     rrf_scores[doc_id] += EXPANSION_RRF_WEIGHT * round_weight / (rrf_k + rank + 1)
 
                 logger.info(
-                    f"  PPR-filtered expansion: {len(all_discovered)} entities, "
-                    f"selected edges: {len(selected_pairs)}/{len(ppr_connections)}, "
+                    f"  Expansion PPR (full graph): {len(all_discovered)} entities, "
+                    f"selected edges: {len(selected_pairs)}, overlay_total: {len(overlay_edges)}, "
                     f"round_weight: {round_weight:.1f}"
                 )
 
@@ -532,11 +581,6 @@ class ReasoningController:
                 f"  Round {round_i} done ({round_time:.2f}s). "
                 f"Metrics: {round_metrics}"
             )
-
-            # Early stop
-            if round_metrics.get("Recall@5", 0) >= 1.0:
-                logger.info(f"  Recall@5=1.0 at round {round_i}, early stop.")
-                break
 
             if round_i == self.max_rounds - 1:
                 break

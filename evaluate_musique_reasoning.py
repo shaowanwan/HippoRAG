@@ -256,8 +256,6 @@ def run_evaluation(data, sample_limit, max_rounds, openie_cache=None):
         from src.hipporag.utils.misc_utils import compute_mdhash_id
         cache_data = json.load(open(openie_cache))
         for doc in cache_data["docs"]:
-            # Cache may have "text" field (gpt-4o-mini) or only "passage" (qwen-plus)
-            # passage format is "title\ntext", so extract text after first newline
             if "text" in doc:
                 text_key = doc["text"]
             else:
@@ -277,7 +275,7 @@ def run_evaluation(data, sample_limit, max_rounds, openie_cache=None):
         except Exception:
             all_results = []
 
-    # Pre-load embedding model once to avoid reloading per sample (~45s each for NV-Embed-v2)
+    # Pre-load embedding model once
     logger.info(f"Pre-loading embedding model: {embedding_model_name}")
     t_emb = time.time()
     shared_embedding_model = _get_embedding_model_class(
@@ -285,14 +283,78 @@ def run_evaluation(data, sample_limit, max_rounds, openie_cache=None):
     )(embedding_model_name=embedding_model_name)
     logger.info(f"Embedding model loaded in {time.time() - t_emb:.1f}s")
 
-    # Per-sample timeout (seconds) to prevent hanging on API calls
-    SAMPLE_TIMEOUT = 300  # 5 minutes per sample
+    # Per-query timeout (seconds) to prevent hanging on API calls
+    QUERY_TIMEOUT = 300  # 5 minutes per query
 
-    def _sample_timeout_handler(signum, frame):
-        raise TimeoutError("Sample timed out")
+    def _query_timeout_handler(signum, frame):
+        raise TimeoutError("Query timed out")
 
     total_start = time.time()
 
+    # ── Build global corpus index (full corpus, one graph) ────────────
+    corpus_path = "reproduce/dataset/musique_corpus.json"
+    logger.info(f"Loading corpus from {corpus_path}...")
+    corpus = json.load(open(corpus_path))
+    all_docs = [f"{doc['title']}\n{doc['text']}" for doc in corpus]
+    logger.info(f"Global corpus: {len(all_docs)} passages")
+
+    # Global index dir follows HippoRAG 2 convention: outputs/musique/{llm}_{embedding}
+    llm_tag = llm_model_name.replace("/", "_")
+    emb_tag = embedding_model_name.replace("/", "_")
+    global_save_dir = os.path.join("outputs", "musique", f"{llm_tag}_{emb_tag}")
+    logger.info(f"Global index dir: {global_save_dir}")
+    from src.hipporag.utils.config_utils import BaseConfig
+    global_config = BaseConfig(
+        save_dir=global_save_dir,
+        llm_base_url=aliyun_base_url,
+        llm_name=llm_model_name,
+        dataset="musique",
+        embedding_model_name=embedding_model_name,
+        force_index_from_scratch=False,
+        force_openie_from_scratch=False,
+        retrieval_top_k=200,
+        linking_top_k=5,
+        max_qa_steps=3,
+        qa_top_k=5,
+        graph_type="facts_and_sim_passage_node_unidirectional",
+        embedding_batch_size=8,
+        corpus_len=len(all_docs),
+    )
+    hipporag = HippoRAG(global_config=global_config)
+
+    # Inject full OpenIE cache
+    if openie_text_lookup:
+        os.makedirs(global_save_dir, exist_ok=True)
+        from src.hipporag.utils.misc_utils import compute_mdhash_id
+        cache_dest = hipporag.openie_results_path
+        matched_docs = []
+        for doc_text in all_docs:
+            if doc_text in openie_text_lookup:
+                cached = openie_text_lookup[doc_text]
+                new_idx = compute_mdhash_id(doc_text, prefix="chunk-")
+                matched_docs.append({
+                    "idx": new_idx,
+                    "passage": doc_text,
+                    "extracted_entities": cached["extracted_entities"],
+                    "extracted_triples": cached.get("extracted_triples", []),
+                })
+        if matched_docs:
+            with open(cache_dest, "w") as f:
+                json.dump({"docs": matched_docs}, f)
+            logger.info(f"Injected {len(matched_docs)}/{len(all_docs)} cached OpenIE results")
+            graph_pickle = hipporag._graph_pickle_filename
+            if os.path.exists(graph_pickle):
+                if os.path.getmtime(cache_dest) > os.path.getmtime(graph_pickle):
+                    os.remove(graph_pickle)
+                    logger.info("Removed stale graph.pickle")
+
+    logger.info("Indexing global corpus (this may take a while)...")
+    t_idx = time.time()
+    hipporag.index(docs=all_docs)
+    logger.info(f"Global index built in {time.time() - t_idx:.1f}s: "
+                f"{hipporag.graph.vcount()} nodes, {hipporag.graph.ecount()} edges")
+
+    # ── Per-query evaluation ──────────────────────────────────────────
     for idx, sample in enumerate(data):
         # Skip already completed samples
         if idx < len(all_results):
@@ -302,96 +364,19 @@ def run_evaluation(data, sample_limit, max_rounds, openie_cache=None):
         paragraphs = sample.get("paragraphs", [])
         answer = sample.get("answer", "")
         answer_aliases = sample.get("answer_aliases", [])
-        docs = [para.get("paragraph_text", "") for para in paragraphs]
 
-        gold_docs_list = [
-            para.get("paragraph_text", "")
+        gold_docs_list = list(set(
+            para.get("title", "") + "\n" + (para.get("text", "") or para.get("paragraph_text", ""))
             for para in paragraphs
             if para.get("is_supporting", False)
-        ]
+        ))
         gold_answers = [answer] + answer_aliases
-
-        # Use shared directory for graph building (all experiments share the same graphs)
-        per_sample_dir = os.path.join(shared_graph_dir, f"sample_{idx:06d}")
 
         logger.info(f"[{idx+1}/{len(data)}] {question[:80]}...")
 
-        # Set per-sample timeout to prevent hanging on API calls
-        old_handler = signal.signal(signal.SIGALRM, _sample_timeout_handler)
-        signal.alarm(SAMPLE_TIMEOUT)
-
-        try:
-            hipporag = HippoRAG(
-                save_dir=per_sample_dir,
-                llm_model_name=llm_model_name,
-                embedding_model_name=embedding_model_name,
-                llm_base_url=aliyun_base_url,
-                embedding_model=shared_embedding_model,
-            )
-            # Inject pre-computed OpenIE cache with correct chunk hashes
-            if openie_text_lookup:
-                os.makedirs(per_sample_dir, exist_ok=True)
-                cache_dest = hipporag.openie_results_path
-                if True:  # Always overwrite to ensure consistent OpenIE
-                    matched_docs = []
-                    for doc_text in docs:
-                        if doc_text in openie_text_lookup:
-                            cached = openie_text_lookup[doc_text]
-                            # Recompute idx using the actual text (no title prefix)
-                            # to match what HippoRAG's embedding_store will generate
-                            new_idx = compute_mdhash_id(doc_text, prefix="chunk-")
-                            matched_docs.append({
-                                "idx": new_idx,
-                                "passage": doc_text,
-                                "extracted_entities": cached["extracted_entities"],
-                                "extracted_triples": cached.get("extracted_triples", []),
-                            })
-                    if matched_docs:
-                        with open(cache_dest, "w") as f:
-                            json.dump({"docs": matched_docs}, f)
-                        logger.debug(f"  Injected {len(matched_docs)}/{len(docs)} cached OpenIE results")
-                        # Invalidate stale graph.pickle if OpenIE cache is newer
-                        graph_pickle = hipporag._graph_pickle_filename
-                        if os.path.exists(graph_pickle):
-                            if os.path.getmtime(cache_dest) > os.path.getmtime(graph_pickle):
-                                os.remove(graph_pickle)
-                                logger.debug(f"  Removed stale graph.pickle (older than OpenIE cache)")
-            hipporag.index(docs=docs)
-        except TimeoutError:
-            logger.error(f"  Sample {idx} timed out during indexing")
-            signal.alarm(0)
-            signal.signal(signal.SIGALRM, old_handler)
-            all_results.append({
-                "idx": idx, "question": question, "gold_answer": answer,
-                "gold_aliases": answer_aliases,
-                "baseline_answer": "Error", "reasoning_answer": "Error",
-                "baseline_retrieval": {}, "reasoning_retrieval": {},
-                "baseline_qa": {}, "reasoning_qa": {},
-                "baseline_time": 0, "reasoning_time": 0, "error": "Timeout during indexing",
-            })
-            try:
-                del hipporag
-            except NameError:
-                pass
-            gc.collect()
-            continue
-        except Exception as e:
-            logger.error(f"  Index failed: {e}")
-            signal.alarm(0)
-            signal.signal(signal.SIGALRM, old_handler)
-            all_results.append({
-                "idx": idx, "question": question, "gold_answer": answer,
-                "baseline_answer": "Error", "reasoning_answer": "Error",
-                "baseline_retrieval": {}, "reasoning_retrieval": {},
-                "baseline_qa": {}, "reasoning_qa": {},
-                "baseline_time": 0, "reasoning_time": 0, "error": str(e),
-            })
-            try:
-                del hipporag
-            except NameError:
-                pass
-            gc.collect()
-            continue
+        # Set per-query timeout
+        old_handler = signal.signal(signal.SIGALRM, _query_timeout_handler)
+        signal.alarm(QUERY_TIMEOUT)
 
         # --- Baseline ---
         t0 = time.time()
@@ -417,7 +402,7 @@ def run_evaluation(data, sample_limit, max_rounds, openie_cache=None):
         baseline_time = time.time() - t0
 
         # Reset alarm for reasoning phase
-        signal.alarm(SAMPLE_TIMEOUT)
+        signal.alarm(QUERY_TIMEOUT)
 
         # --- Reasoning ---
         t0 = time.time()
@@ -464,10 +449,6 @@ def run_evaluation(data, sample_limit, max_rounds, openie_cache=None):
         }
         all_results.append(result)
 
-        # Free per-sample data (but keep shared embedding model)
-        del hipporag
-        gc.collect()
-
         # Quick EM check
         b_match = "Y" if check_em(baseline_answer, answer, answer_aliases) else "N"
         r_match = "Y" if check_em(reasoning_answer, answer, answer_aliases) else "N"
@@ -481,11 +462,12 @@ def run_evaluation(data, sample_limit, max_rounds, openie_cache=None):
         if (idx + 1) % 5 == 0:
             save_results(output_path, config, all_results)
             n = len(all_results)
-            b_em = sum(1 for r in all_results if check_em(r["baseline_answer"], r["gold_answer"], r.get("gold_aliases", []))) / n
-            r_em = sum(1 for r in all_results if check_em(r["reasoning_answer"], r["gold_answer"], r.get("gold_aliases", []))) / n
-            elapsed = time.time() - total_start
-            eta = elapsed / n * (len(data) - n)
-            logger.info(f"  >>> Progress: {n}/{len(data)} | Baseline EM={b_em:.3f} | Reasoning EM={r_em:.3f} | ETA={eta/60:.0f}min")
+            if n > 0:
+                b_em = sum(1 for r in all_results if check_em(r["baseline_answer"], r["gold_answer"], r.get("gold_aliases", []))) / n
+                r_em = sum(1 for r in all_results if check_em(r["reasoning_answer"], r["gold_answer"], r.get("gold_aliases", []))) / n
+                elapsed = time.time() - total_start
+                eta = elapsed / n * (len(data) - n)
+                logger.info(f"  >>> Progress: {n}/{len(data)} | Baseline EM={b_em:.3f} | Reasoning EM={r_em:.3f} | ETA={eta/60:.0f}min")
 
     # Final save
     save_results(output_path, config, all_results)
@@ -616,7 +598,7 @@ def run_evaluation(data, sample_limit, max_rounds, openie_cache=None):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data_path", type=str, default="musique.json")
+    parser.add_argument("--data_path", type=str, default="reproduce/dataset/musique.json")
     parser.add_argument("--sample_limit", type=int, default=200)
     parser.add_argument("--max_rounds", type=int, default=3)
     parser.add_argument("--seed", type=int, default=42)
