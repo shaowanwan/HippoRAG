@@ -475,7 +475,7 @@ class ReasoningController:
 
             logger.info(f"  Round {round_i}: query='{state.current_query[:60]}...'")
 
-            # Step 1: Full pipeline retrieval on full graph (seeds from fact/sentence matching)
+            # Step 1: Get pipeline seeds (fact/sentence matching)
             sorted_doc_ids, sorted_doc_scores, node_weights = self._retrieve_single_query(
                 state.current_query,
             )
@@ -485,12 +485,7 @@ class ReasoningController:
             if round_i == 0:
                 round0_top_doc_ids = [int(d) for d in sorted_doc_ids[:20]]
 
-            # Step 2: RRF accumulate (later rounds weighted higher)
-            round_weight = 1.0 + round_i * RRF_ROUND_BOOST
-            for rank, doc_id in enumerate(sorted_doc_ids):
-                rrf_scores[doc_id] += PIPELINE_RRF_WEIGHT * round_weight / (rrf_k + rank + 1)
-
-            # Step 3: If we have discovered entities from previous rounds, run expansion PPR on full graph
+            # Step 2: Build merged seeds and run single PPR
             if all_discovered and base_node_weights is not None:
                 existing_seeds = self._get_existing_seed_ids(base_node_weights)
 
@@ -502,10 +497,10 @@ class ReasoningController:
                     graph=hip.graph,
                 )
 
-                # Build expansion weights: pipeline seeds + bridge entity seeds
-                modified_weights = base_node_weights.copy()
+                # Merge pipeline seeds + bridge entity seeds
+                merged_weights = base_node_weights.copy()
                 for name, vid in all_discovered.items():
-                    modified_weights[vid] += self._degree_adaptive_weight(vid, DEFAULT_ENTITY_SEED_WEIGHT)
+                    merged_weights[vid] += self._degree_adaptive_weight(vid, DEFAULT_ENTITY_SEED_WEIGHT)
 
                 # Build overlay on full graph with accumulated bridge edges
                 overlay = GraphOverlay(hip.graph)
@@ -528,8 +523,10 @@ class ReasoningController:
                     overlay.add_reasoning_edge(edge[0], edge[1], edge[2])
 
                 working_graph = overlay.get_working_graph() if overlay else None
-                boosted_doc_ids, boosted_doc_scores = hip.run_ppr(
-                    modified_weights,
+
+                # Single merged PPR: pipeline seeds + bridge seeds on overlay graph
+                sorted_doc_ids, sorted_doc_scores = hip.run_ppr(
+                    merged_weights,
                     damping=EXPANSION_DAMPING,
                     graph=working_graph,
                 )
@@ -543,15 +540,15 @@ class ReasoningController:
                                 self._degree_adaptive_weight(v2, 1.0))
                         overlay_edges.append((v1, v2, w))
 
-                # Expansion RRF accumulate
-                for rank, doc_id in enumerate(boosted_doc_ids):
-                    rrf_scores[doc_id] += EXPANSION_RRF_WEIGHT * round_weight / (rrf_k + rank + 1)
-
                 logger.info(
-                    f"  Expansion PPR (full graph): {len(all_discovered)} entities, "
-                    f"selected edges: {len(selected_pairs)}, overlay_total: {len(overlay_edges)}, "
-                    f"round_weight: {round_weight:.1f}"
+                    f"  Merged PPR (full graph): {len(all_discovered)} entities, "
+                    f"selected edges: {len(selected_pairs)}, overlay_total: {len(overlay_edges)}"
                 )
+
+            # Step 3: RRF accumulate (later rounds weighted higher)
+            round_weight = 1.0 + round_i * RRF_ROUND_BOOST
+            for rank, doc_id in enumerate(sorted_doc_ids):
+                rrf_scores[doc_id] += round_weight / (rrf_k + rank + 1)
 
             final_sorted_ids = np.argsort(rrf_scores)[::-1]
             top_k_docs = [
