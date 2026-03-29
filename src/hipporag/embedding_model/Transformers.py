@@ -20,7 +20,7 @@ class TransformersEmbeddingModel(BaseEmbeddingModel):
 
         self.model_id = embedding_model_name[len("Transformers/"):]
         self.embedding_type = 'float'
-        self.batch_size = 64
+        self.batch_size = getattr(global_config, 'embedding_batch_size', 64) if global_config else 64
 
         self.model = SentenceTransformer(self.model_id, device = "cuda" if torch.cuda.is_available() else "cpu", trust_remote_code=True)
         # Disable KV cache to avoid DynamicCache.get_usable_length() error with transformers>=4.56
