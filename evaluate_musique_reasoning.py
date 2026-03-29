@@ -275,14 +275,6 @@ def run_evaluation(data, sample_limit, max_rounds, openie_cache=None):
         except Exception:
             all_results = []
 
-    # Pre-load embedding model once
-    logger.info(f"Pre-loading embedding model: {embedding_model_name}")
-    t_emb = time.time()
-    shared_embedding_model = _get_embedding_model_class(
-        embedding_model_name=embedding_model_name
-    )(embedding_model_name=embedding_model_name)
-    logger.info(f"Embedding model loaded in {time.time() - t_emb:.1f}s")
-
     # Per-query timeout (seconds) to prevent hanging on API calls
     QUERY_TIMEOUT = 300  # 5 minutes per query
 
