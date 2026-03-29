@@ -239,6 +239,27 @@ class NERIndex:
         self.entity_node_idxs = []
         self.passage_node_idxs = []
 
+    def save(self, path: str):
+        """Save index to pickle for reuse."""
+        import pickle
+        # Don't save embedding_model (not picklable)
+        emb = self.embedding_model
+        self.embedding_model = None
+        with open(path, 'wb') as f:
+            pickle.dump(self, f)
+        self.embedding_model = emb
+        logger.info(f"Saved NERIndex to {path}")
+
+    @classmethod
+    def load(cls, path: str, embedding_model):
+        """Load index from pickle."""
+        import pickle
+        with open(path, 'rb') as f:
+            index = pickle.load(f)
+        index.embedding_model = embedding_model
+        logger.info(f"Loaded NERIndex from {path}: {index.graph.vcount()} nodes, {index.graph.ecount()} edges")
+        return index
+
     def build(self, docs: List[str], ner_results: Dict[str, List[str]]):
         """Build index from docs and pre-computed NER results.
 
@@ -1491,10 +1512,16 @@ def run_evaluation(args):
                 global_ner_results[doc_text] = entities
                 ner_cache[doc_text] = entities
 
-        logger.info(f"Building GLOBAL NER index for {len(all_docs)} passages...")
-        global_index = NERIndex(embedding_model=emb_model)
-        global_index.build(all_docs, global_ner_results)
-        logger.info(f"  Global index: {global_index.graph.vcount()} nodes, {global_index.graph.ecount()} edges")
+        # Check for cached global index
+        cache_path = os.path.join(save_dir, "global_ner_index.pkl")
+        if os.path.exists(cache_path):
+            global_index = NERIndex.load(cache_path, embedding_model=emb_model)
+        else:
+            logger.info(f"Building GLOBAL NER index for {len(all_docs)} passages...")
+            global_index = NERIndex(embedding_model=emb_model)
+            global_index.build(all_docs, global_ner_results)
+            logger.info(f"  Global index: {global_index.graph.vcount()} nodes, {global_index.graph.ecount()} edges")
+            global_index.save(cache_path)
 
     for idx, sample in enumerate(data):
         question = sample.get("question", "")
