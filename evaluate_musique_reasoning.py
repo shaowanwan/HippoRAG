@@ -318,6 +318,8 @@ def run_evaluation(data, sample_limit, max_rounds, openie_cache=None):
         qa_top_k=5,
         graph_type="facts_and_sim_passage_node_unidirectional",
         embedding_batch_size=8,
+        synonymy_edge_query_batch_size=500,
+        synonymy_edge_key_batch_size=2000,
         corpus_len=len(all_docs),
     )
     hipporag = HippoRAG(global_config=global_config)
