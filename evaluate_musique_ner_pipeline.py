@@ -18,6 +18,7 @@ import logging
 import time
 import gc
 import re as _re
+from datetime import datetime
 from itertools import combinations
 from collections import defaultdict
 from hashlib import md5
@@ -36,6 +37,34 @@ logger = logging.getLogger(__name__)
 
 def compute_hash(content: str, prefix: str = "") -> str:
     return prefix + md5(content.encode()).hexdigest()
+
+
+def _file_content_fingerprint(path: Optional[str]) -> str:
+    if not path:
+        return "none"
+    if not os.path.exists(path):
+        return "missing"
+    with open(path, "rb") as f:
+        return md5(f.read()).hexdigest()
+
+
+def _index_cache_dir(base_dir: str, embedding_model_name: str, ner_cache_path: Optional[str], docs: List[str]) -> str:
+    docs_fingerprint = md5(json.dumps(list(docs), ensure_ascii=False).encode()).hexdigest()
+    ner_info = _file_content_fingerprint(ner_cache_path)
+    cache_id = md5(f"{embedding_model_name}|docs={len(docs)}|{docs_fingerprint}|{ner_info}".encode()).hexdigest()
+    return os.path.join(base_dir, "ner_index_cache", cache_id)
+
+
+def _make_results_output_path(save_dir: str, mode: str, max_rounds: int, run_id: Optional[str] = None) -> str:
+    if mode == "ircot":
+        output_tag = f"_ircot_rounds{max_rounds}"
+    elif max_rounds > 1:
+        output_tag = f"_rounds{max_rounds}"
+    else:
+        output_tag = ""
+    if run_id is None:
+        run_id = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{os.getpid()}"
+    return os.path.join(save_dir, f"comparison_results{output_tag}_{run_id}.json")
 
 
 def normalize_answer(s):
@@ -175,6 +204,9 @@ def llm_ner(text: str, llm_client) -> List[str]:
 class NERIndex:
     """NER-based index: sentences, entities, entity-passage graph."""
 
+    PAIR_SENTENCE_TOPK = 256
+    PAIR_PASSAGE_TOPK = 48
+
     def __init__(self, embedding_model):
         self.embedding_model = embedding_model
         # Sentence store: {sentence_id: {text, passage_id, entities}}
@@ -198,6 +230,9 @@ class NERIndex:
         self.pairs = []
         # Sentence ID list (ordered)
         self.sentence_ids = []
+        self.sent_to_pair_indices = defaultdict(list)
+        self.passage_to_pair_indices = defaultdict(list)
+        self._pair_embedding_cache = {}
         # Graph
         self.graph = None
         self.node_name_to_idx = {}
@@ -268,6 +303,13 @@ class NERIndex:
 
         logger.info(f"  {len(self.pairs)} entity pairs from sentences")
 
+        self.sent_to_pair_indices = defaultdict(list)
+        self.passage_to_pair_indices = defaultdict(list)
+        for pair_idx, (_, _, _, _, sent_id) in enumerate(self.pairs):
+            self.sent_to_pair_indices[sent_id].append(pair_idx)
+            passage_id = self.sentences[sent_id]["passage_id"]
+            self.passage_to_pair_indices[passage_id].append(pair_idx)
+
         # Step 3: Compute embeddings
         logger.info("  Computing sentence embeddings...")
         sent_texts = [self.sentences[sid]["text"] for sid in self.sentence_ids]
@@ -289,12 +331,9 @@ class NERIndex:
         else:
             self.entity_embeddings = np.array([])
 
-        logger.info("  Computing pair embeddings...")
-        if self.pairs:
-            pair_texts = [f"{p[0]} | {p[2]} | {self.sentences[p[4]]['text']}" for p in self.pairs]
-            self.pair_embeddings = self.embedding_model.batch_encode(pair_texts)
-        else:
-            self.pair_embeddings = np.array([])
+        # Pair embeddings are computed lazily per query to avoid full materialization cost.
+        self.pair_embeddings = np.array([])
+        self._pair_embedding_cache = {}
 
         # Step 3: Build graph
         self._build_graph()
@@ -371,24 +410,69 @@ class NERIndex:
             self.graph.add_edges(edges)
             self.graph.es["weight"] = weights
 
-    def retrieve(self, query: str, top_k: int = 5, passage_weight_scale: float = 0.05,
-                 link_top_k: int = 5, pair_alpha: float = 0.5,
-                 sent_alpha: float = 0.5,
-                 entity_top_k: int = 5,
-                 mmr_lambda: float = 0.7) -> Tuple[np.ndarray, np.ndarray]:
-        """Retrieve passages using pair matching + sentence matching → PPR.
+    def _get_pair_text(self, pair_idx: int) -> str:
+        t1, _, t2, _, sent_id = self.pairs[pair_idx]
+        return f"{t1} | {t2} | {self.sentences[sent_id]['text']}"
 
-        1. Pair matching: query vs pair embeddings ("entity1 | entity2 | sentence")
-        2. Sentence matching: query vs sentence embeddings (pair's source sentence)
-        3. MMR selection → top-k diverse pairs → extract entities as seeds
-        4. Top-k entity filtering: only keep highest-weight entities, zero out rest
-        5. Passage matching: auxiliary passage-level seeds
-        6. PPR
+    def _get_pair_embeddings_for_indices(self, pair_indices: List[int]) -> np.ndarray:
+        if not pair_indices:
+            return np.array([])
+        ordered_indices = list(pair_indices)
+        missing_texts = []
+        missing_keys = []
+        for pi in ordered_indices:
+            pair_text = self._get_pair_text(pi)
+            if pair_text not in self._pair_embedding_cache:
+                missing_texts.append(pair_text)
+                missing_keys.append(pair_text)
+        if missing_texts:
+            logger.info(f"  Lazy pair embeddings: computing {len(missing_texts)} missing candidates")
+            new_embs = self.embedding_model.batch_encode(missing_texts)
+            for key, emb in zip(missing_keys, new_embs):
+                self._pair_embedding_cache[key] = emb
+        return np.vstack([self._pair_embedding_cache[self._get_pair_text(pi)] for pi in ordered_indices])
 
-        Returns: (sorted_doc_ids, sorted_doc_scores) indexing into self.passage_keys
-        """
-        # Encode query (instruction only for instruction-tuned models, e.g. GTE-Qwen2)
-        # MiniLM is NOT instruction-tuned, so instruction='' to avoid polluting embeddings
+    def _collect_candidate_pair_indices(self, sent_scores_all: np.ndarray,
+                                        passage_scores_all: Optional[np.ndarray] = None) -> List[int]:
+        if not self.pairs:
+            return []
+        if (
+            sent_scores_all is None
+            and passage_scores_all is None
+        ) or (
+            not self.sent_to_pair_indices and not self.passage_to_pair_indices
+        ):
+            return list(range(len(self.pairs)))
+
+        candidate_pair_idxs = []
+        seen = set()
+
+        if sent_scores_all is not None and self.sent_to_pair_indices:
+            top_sentence_k = min(self.PAIR_SENTENCE_TOPK, len(self.sentence_ids))
+            top_sent_idxs = np.argsort(sent_scores_all)[::-1][:top_sentence_k].tolist()
+            for si in top_sent_idxs:
+                sid = self.sentence_ids[si]
+                for pi in self.sent_to_pair_indices.get(sid, []):
+                    if pi not in seen:
+                        seen.add(pi)
+                        candidate_pair_idxs.append(pi)
+
+        if passage_scores_all is not None and self.passage_to_pair_indices:
+            top_passage_k = min(self.PAIR_PASSAGE_TOPK, len(self.passage_keys))
+            top_passage_local_idxs = np.argsort(passage_scores_all)[::-1][:top_passage_k].tolist()
+            for local_idx in top_passage_local_idxs:
+                passage_id = self.passage_keys[local_idx]
+                for pi in self.passage_to_pair_indices.get(passage_id, []):
+                    if pi not in seen:
+                        seen.add(pi)
+                        candidate_pair_idxs.append(pi)
+
+        return candidate_pair_idxs if candidate_pair_idxs else list(range(len(self.pairs)))
+
+    def _compute_node_weights(self, query: str, passage_weight_scale: float = 0.05,
+                              link_top_k: int = 5, pair_alpha: float = 0.5,
+                              sent_alpha: float = 0.5, entity_top_k: int = 5,
+                              mmr_lambda: float = 0.7) -> np.ndarray:
         use_instruction = getattr(self.embedding_model, 'supports_instruction', False)
         sent_instr = QUERY_INSTRUCTION_SENTENCE if use_instruction else ''
         pass_instr = QUERY_INSTRUCTION_PASSAGE if use_instruction else ''
@@ -398,72 +482,76 @@ class NERIndex:
             [query], instruction=pass_instr))
 
         node_weights = np.zeros(self.graph.vcount())
-
-        # Build sentence_id → index lookup
         sent_id_to_idx = {sid: i for i, sid in enumerate(self.sentence_ids)}
+        sent_scores_all = None
+        if self.sentence_embeddings is not None and len(self.sentence_embeddings) > 0:
+            sent_scores_all = (self.sentence_embeddings @ query_emb_sentence.T).flatten()
+            sent_scores_all = min_max_normalize(sent_scores_all)
+        passage_scores = None
+        if self.passage_embeddings is not None and len(self.passage_embeddings) > 0:
+            passage_scores = (self.passage_embeddings @ query_emb_passage.T).flatten()
+            passage_scores = min_max_normalize(passage_scores)
 
-        # === Step 1: Pair matching + Sentence matching → combined score ===
-        if self.pair_embeddings is not None and len(self.pair_embeddings) > 0:
-            # Pair scores: query (fact instruction) vs pair embeddings
-            pair_scores = (self.pair_embeddings @ query_emb_sentence.T).flatten()
-            pair_scores = min_max_normalize(pair_scores)
-
-            # Sentence scores for each pair's source sentence
-            sent_scores_all = None
-            if self.sentence_embeddings is not None and len(self.sentence_embeddings) > 0:
-                sent_scores_all = (self.sentence_embeddings @ query_emb_sentence.T).flatten()
-                sent_scores_all = min_max_normalize(sent_scores_all)
-
-            # Combined score per pair
-            combined_scores = np.zeros(len(self.pairs))
-            for pi, (t1, k1, t2, k2, sent_id) in enumerate(self.pairs):
-                p_score = pair_scores[pi]
-                s_score = 0.0
-                if sent_scores_all is not None:
-                    si = sent_id_to_idx.get(sent_id, -1)
-                    if si >= 0:
-                        s_score = sent_scores_all[si]
-                combined_scores[pi] = pair_alpha * p_score + sent_alpha * s_score
-
-            # MMR-based diverse pair selection
-            # Pre-compute pair embedding norms for similarity calculation
-            pair_norms = np.linalg.norm(self.pair_embeddings, axis=1, keepdims=True)
-            pair_norms = np.where(pair_norms == 0, 1, pair_norms)
-            normed_pairs = self.pair_embeddings / pair_norms
-
-            # Candidate pool: top 30 by combined score
-            candidate_size = min(30, len(self.pairs))
-            candidate_idxs = np.argsort(combined_scores)[::-1][:candidate_size].tolist()
-
+        if self.pairs:
             top_pair_idxs = []
-            selected_embs = []
-            for _ in range(link_top_k):
-                if not candidate_idxs:
-                    break
-                if not selected_embs:
-                    # First pick: highest combined score
-                    best = candidate_idxs[0]
-                else:
-                    # MMR: balance relevance and diversity
-                    selected_matrix = np.array(selected_embs)  # (n_selected, dim)
-                    best_mmr = -float('inf')
-                    best = candidate_idxs[0]
-                    for ci in candidate_idxs:
-                        relevance = combined_scores[ci]
-                        # Max similarity to any already selected pair
-                        sim = np.max(normed_pairs[ci] @ selected_matrix.T)
-                        mmr_score = mmr_lambda * relevance - (1 - mmr_lambda) * sim
-                        if mmr_score > best_mmr:
-                            best_mmr = mmr_score
-                            best = ci
-                top_pair_idxs.append(best)
-                selected_embs.append(normed_pairs[best])
-                candidate_idxs.remove(best)
+            combined_scores_lookup = {}
+            candidate_pair_idxs = self._collect_candidate_pair_indices(
+                sent_scores_all=sent_scores_all,
+                passage_scores_all=passage_scores,
+            )
+            candidate_pair_embs = self._get_pair_embeddings_for_indices(candidate_pair_idxs)
+            if len(candidate_pair_embs) > 0:
+                pair_scores = (candidate_pair_embs @ query_emb_sentence.T).flatten()
+                pair_scores = min_max_normalize(pair_scores)
+
+                combined_scores = np.zeros(len(candidate_pair_idxs))
+                for local_idx, pi in enumerate(candidate_pair_idxs):
+                    _, _, _, _, sent_id = self.pairs[pi]
+                    s_score = 0.0
+                    if sent_scores_all is not None:
+                        si = sent_id_to_idx.get(sent_id, -1)
+                        if si >= 0:
+                            s_score = sent_scores_all[si]
+                    combined_scores[local_idx] = pair_alpha * pair_scores[local_idx] + sent_alpha * s_score
+
+                pair_norms = np.linalg.norm(candidate_pair_embs, axis=1, keepdims=True)
+                pair_norms = np.where(pair_norms == 0, 1, pair_norms)
+                normed_pairs = candidate_pair_embs / pair_norms
+
+                candidate_size = min(30, len(candidate_pair_idxs))
+                candidate_local_idxs = np.argsort(combined_scores)[::-1][:candidate_size].tolist()
+
+                selected_embs = []
+                for _ in range(link_top_k):
+                    if not candidate_local_idxs:
+                        break
+                    if not selected_embs:
+                        best_local = candidate_local_idxs[0]
+                    else:
+                        selected_matrix = np.array(selected_embs)
+                        best_mmr = -float("inf")
+                        best_local = candidate_local_idxs[0]
+                        for local_idx in candidate_local_idxs:
+                            relevance = combined_scores[local_idx]
+                            sim = np.max(normed_pairs[local_idx] @ selected_matrix.T)
+                            mmr_score = mmr_lambda * relevance - (1 - mmr_lambda) * sim
+                            if mmr_score > best_mmr:
+                                best_mmr = mmr_score
+                                best_local = local_idx
+                    best_pair_idx = candidate_pair_idxs[best_local]
+                    top_pair_idxs.append(best_pair_idx)
+                    selected_embs.append(normed_pairs[best_local])
+                    candidate_local_idxs.remove(best_local)
+                combined_scores_lookup = {
+                    candidate_pair_idxs[local_idx]: combined_scores[local_idx]
+                    for local_idx in np.argsort(combined_scores)[::-1][:candidate_size].tolist()
+                }
+
             ent_occur_count = np.zeros(self.graph.vcount())
             ent_max_score = np.zeros(self.graph.vcount())
             for pi in top_pair_idxs:
                 t1, k1, t2, k2, sent_id = self.pairs[pi]
-                score = combined_scores[pi]
+                score = combined_scores_lookup.get(pi, 0.0)
                 for ent_key in [k1, k2]:
                     ent_idx = self.node_name_to_idx.get(ent_key)
                     if ent_idx is not None:
@@ -473,14 +561,11 @@ class NERIndex:
                         ent_occur_count[ent_idx] += 1
                         if weighted_score > ent_max_score[ent_idx]:
                             ent_max_score[ent_idx] = weighted_score
-            # (max + average) / 2
             for idx in self.entity_node_idxs:
                 if ent_occur_count[idx] > 0:
                     avg = node_weights[idx] / ent_occur_count[idx]
                     node_weights[idx] = (ent_max_score[idx] + avg) / 2.0
 
-        # === Step 2: Top-k entity filtering (like HippoRAG's get_top_k_weights) ===
-        # Only keep entity_top_k highest-weight entity seeds, zero out the rest
         entity_weights = [(idx, node_weights[idx]) for idx in self.entity_node_idxs if node_weights[idx] > 0]
         if len(entity_weights) > entity_top_k:
             entity_weights.sort(key=lambda x: x[1], reverse=True)
@@ -489,37 +574,55 @@ class NERIndex:
                 if idx not in keep_idxs:
                     node_weights[idx] = 0.0
 
-        # === Step 3: Passage matching (auxiliary, using passage instruction) ===
-        if self.passage_embeddings is not None and len(self.passage_embeddings) > 0:
-            passage_scores = (self.passage_embeddings @ query_emb_passage.T).flatten()
-            passage_scores = min_max_normalize(passage_scores) * passage_weight_scale
+        if passage_scores is not None:
+            passage_scores = passage_scores * passage_weight_scale
             for i, p_idx in enumerate(self.passage_node_idxs):
                 node_weights[p_idx] = passage_scores[i]
 
+        return node_weights
+
+    def retrieve(self, query: str, top_k: int = 5, passage_weight_scale: float = 0.05,
+                 link_top_k: int = 5, pair_alpha: float = 0.5,
+                 sent_alpha: float = 0.5,
+                 entity_top_k: int = 5,
+                 mmr_lambda: float = 0.7,
+                 working_graph=None,
+                 extra_node_weights: Optional[np.ndarray] = None,
+                 return_node_weights: bool = False) -> Tuple[np.ndarray, np.ndarray]:
+        """Retrieve passages using pair matching + sentence matching → PPR."""
+        base_node_weights = self._compute_node_weights(
+            query=query,
+            passage_weight_scale=passage_weight_scale,
+            link_top_k=link_top_k,
+            pair_alpha=pair_alpha,
+            sent_alpha=sent_alpha,
+            entity_top_k=entity_top_k,
+            mmr_lambda=mmr_lambda,
+        )
+        node_weights = base_node_weights.copy()
+        if extra_node_weights is not None:
+            node_weights = node_weights + extra_node_weights
+
         if node_weights.sum() == 0:
-            # Fallback: return passages by embedding similarity
             logger.warning("No seed weights, falling back to passage embedding")
+            use_instruction = getattr(self.embedding_model, 'supports_instruction', False)
+            pass_instr = QUERY_INSTRUCTION_PASSAGE if use_instruction else ''
+            query_emb_passage = l2_normalize(self.embedding_model.batch_encode(
+                [query], instruction=pass_instr))
             passage_scores = (self.passage_embeddings @ query_emb_passage.T).flatten()
             sorted_ids = np.argsort(passage_scores)[::-1]
+            if return_node_weights:
+                return sorted_ids, passage_scores[sorted_ids], base_node_weights
             return sorted_ids, passage_scores[sorted_ids]
 
-        # PPR (with NaN guard like HippoRAG)
-        damping = 0.5
-        node_weights = np.where(np.isnan(node_weights) | (node_weights < 0), 0, node_weights)
-        ppr_scores = self.graph.personalized_pagerank(
-            vertices=range(self.graph.vcount()),
-            damping=damping,
-            directed=False,
-            weights='weight' if 'weight' in self.graph.es.attributes() else None,
-            reset=node_weights,
-            implementation='prpack',
+        sorted_doc_ids, sorted_doc_scores = _run_ppr(
+            self,
+            reset_prob=node_weights,
+            damping=0.5,
+            graph=working_graph,
         )
-
-        # Extract passage scores
-        doc_scores = np.array([ppr_scores[idx] for idx in self.passage_node_idxs])
-        sorted_doc_ids = np.argsort(doc_scores)[::-1]
-        sorted_doc_scores = doc_scores[sorted_doc_ids]
-
+        if return_node_weights:
+            return sorted_doc_ids, sorted_doc_scores, base_node_weights
         return sorted_doc_ids, sorted_doc_scores
 
 
@@ -603,6 +706,7 @@ RRF_ROUND_BOOST = 0.5
 EXPANSION_DAMPING = 0.7
 MINI_PPR_THRESHOLD = 0.0001
 PIPELINE_RRF_WEIGHT = 0.5
+EXPANSION_RRF_WEIGHT = 1.0
 
 # Prompt (from feature/graph-reshape query_rewriter.py — includes discovered_entities)
 REWRITE_SYSTEM_PROMPT = """You are a retrieval reasoning assistant. Given an original query, the documents retrieved so far, and optionally a reasoning trace, your job is to:
@@ -750,12 +854,13 @@ def _mini_ppr_select_seeds(
     discovered_vertex_ids: Dict[str, int],
     existing_seed_vertex_ids: List[int],
     round0_top_doc_ids: List[int] = None,
+    graph=None,
 ) -> List[Tuple[int, int, float]]:
     """Run mini-PPR from bridge entities on local 5-hop subgraph.
 
     Returns list of (bridge_vid, seed_vid, ppr_score) for selected connections.
     """
-    graph = index.graph
+    graph = graph if graph is not None else index.graph
     passage_idx_set = set(index.passage_node_idxs)
 
     # Build subgraph from round 0 top docs' entities + bridge + seeds
@@ -824,9 +929,53 @@ def _mini_ppr_select_seeds(
     return selected
 
 
-def _build_overlay_graph(index, temp_edges: List[Tuple[int, int, float]]):
-    """Create a copy of the graph with temporary bridge edges added."""
+def _collect_hop_subgraph_vids(index, core_vids: List[int], hops: int = 5) -> List[int]:
+    """Collect k-hop subgraph vertices from core nodes on the full graph."""
+    graph = index.graph
+    subgraph_vids = set(core_vids)
+    for _ in range(hops):
+        frontier = set()
+        for vid in subgraph_vids:
+            for n in graph.neighbors(vid):
+                frontier.add(n)
+        subgraph_vids |= frontier
+    return sorted(subgraph_vids)
+
+
+def _build_masked_graph(index, subgraph_vids: List[int]):
+    """Return a graph copy where edges outside the subgraph are removed while vertex ids stay stable."""
     g = index.graph.copy()
+    keep = set(subgraph_vids)
+    remove_eids = []
+    for eid, (u, v) in enumerate(g.get_edgelist()):
+        if u not in keep or v not in keep:
+            remove_eids.append(eid)
+    if remove_eids:
+        g.delete_edges(remove_eids)
+    return g
+
+
+def _run_ppr(index, reset_prob: np.ndarray, damping: float = 0.5, graph=None) -> Tuple[np.ndarray, np.ndarray]:
+    working_graph = graph if graph is not None else index.graph
+    reset_prob = np.where(np.isnan(reset_prob) | (reset_prob < 0), 0, reset_prob)
+    ppr_scores = working_graph.personalized_pagerank(
+        vertices=range(working_graph.vcount()),
+        damping=damping,
+        directed=False,
+        weights='weight' if 'weight' in working_graph.es.attributes() else None,
+        reset=reset_prob,
+        implementation='prpack',
+    )
+    doc_scores = np.array([ppr_scores[idx] for idx in index.passage_node_idxs])
+    sorted_doc_ids = np.argsort(doc_scores)[::-1]
+    sorted_doc_scores = doc_scores[sorted_doc_ids]
+    return sorted_doc_ids, sorted_doc_scores
+
+
+def _build_overlay_graph(index, temp_edges: List[Tuple[int, int, float]], base_graph=None):
+    """Create a copy of the graph with temporary bridge edges added."""
+    graph = base_graph if base_graph is not None else index.graph
+    g = graph.copy()
     if temp_edges:
         edges = [(e[0], e[1]) for e in temp_edges]
         weights = [e[2] for e in temp_edges]
@@ -900,123 +1049,110 @@ Important: include ALL document numbers exactly once."""
 
 def iterative_retrieve(index, question: str, llm_client, max_rounds: int = 3,
                        gold_docs: List[str] = None):
-    """Multi-round reasoning-guided retrieval with entity seed expansion + RRF.
+    """Multi-round retrieval with one retrieval pass per round.
 
-    Ported from feature/graph-reshape ReasoningController._iterative_retrieve_single().
-
-    Each round:
-      1. Full retrieval with current query → weighted RRF
-      2. If discovered entities exist: resolve → mini-PPR → bridge edges → expansion PPR → RRF
-      3. LLM reasoning → rewrite query + discover bridge entities
-      4. LLM reasoning reranker on final docs
-
-    Returns: (retrieved_docs, reasoning_traces)
+    Core semantics:
+      1. Round0 runs base retrieval on the full graph.
+      2. Later rounds run one merged PPR on the shaped graph.
+      3. Selected seeds and overlay edges accumulate per sample across rounds.
+      4. Mini-PPR updates next-round state; it does not trigger a second retrieve in the same round.
     """
     num_docs = len(index.passage_keys)
     rrf_k = 60
     rrf_scores = np.zeros(num_docs)
     current_query = question
     reasoning_traces = []
-    round_trajectories = []  # full trajectory per round for debugging
-    all_discovered = {}  # name -> vertex_id, accumulated across rounds
+    round_diagnostics = []
+    all_discovered = {}
     base_node_weights = None
     round0_top_doc_ids = None
+    hop5_graph = None
+    hop5_vids = None
+    selected_seed_weights = np.zeros(index.graph.vcount())
+    overlay_edge_weights = {}
 
     for round_i in range(max_rounds):
         logger.info(f"  Round {round_i}: query='{current_query[:60]}...'")
 
-        # Step 1: Full retrieval with current query
-        sorted_doc_ids, sorted_doc_scores = index.retrieve(current_query)
+        base_graph_for_round = index.graph if round_i == 0 else (hop5_graph if hop5_graph is not None else index.graph)
+        working_graph = (
+            _build_overlay_graph(
+                index,
+                [(u, v, w) for (_, (u, v, w)) in overlay_edge_weights.items()],
+                base_graph=base_graph_for_round,
+            )
+            if overlay_edge_weights else base_graph_for_round
+        )
 
-        # Save base node weights from retrieve (reconstruct from retrieve's internal state)
-        # We need the node_weights for expansion PPR — re-derive them
+        extra_node_weights = selected_seed_weights.copy()
+        if hop5_vids is not None:
+            mask = np.zeros_like(extra_node_weights)
+            mask[hop5_vids] = 1.0
+            extra_node_weights = extra_node_weights * mask
+        if not np.count_nonzero(extra_node_weights):
+            extra_node_weights = None
+
+        sorted_doc_ids, sorted_doc_scores, current_node_weights = index.retrieve(
+            current_query,
+            working_graph=working_graph,
+            extra_node_weights=extra_node_weights,
+            return_node_weights=True,
+        )
+        base_node_weights = current_node_weights
+        base_top_docs = [index.passages[index.passage_keys[idx]] for idx in sorted_doc_ids[:10]]
+
         if round_i == 0:
-            # Get node weights by running the seed computation part of retrieve
-            base_node_weights = _compute_base_node_weights(index, current_query)
             round0_top_doc_ids = [int(d) for d in sorted_doc_ids[:20]]
+            if base_node_weights is not None:
+                existing_seeds = _get_existing_seed_ids(index, base_node_weights)
+                core_vids = set(existing_seeds)
+                for doc_id in round0_top_doc_ids:
+                    core_vids.add(index.passage_node_idxs[doc_id])
+                hop5_vids = _collect_hop_subgraph_vids(index, list(core_vids), hops=5)
+                hop5_graph = _build_masked_graph(index, hop5_vids)
+                logger.info(f"  Built hop-5 subgraph: {len(hop5_vids)} nodes, {hop5_graph.ecount()} edges")
 
-        # Step 2: Weighted RRF accumulate (later rounds weighted higher)
         round_weight = 1.0 + round_i * RRF_ROUND_BOOST
         for rank, doc_id in enumerate(sorted_doc_ids):
             rrf_scores[doc_id] += PIPELINE_RRF_WEIGHT * round_weight / (rrf_k + rank + 1)
 
-        # Step 3: If we have discovered entities, run expansion PPR
-        if all_discovered and base_node_weights is not None:
-            existing_seeds = _get_existing_seed_ids(index, base_node_weights)
-
-            # Mini-PPR filtered bridge edges
-            ppr_connections = _mini_ppr_select_seeds(
-                index,
-                discovered_vertex_ids=all_discovered,
-                existing_seed_vertex_ids=existing_seeds,
-                round0_top_doc_ids=round0_top_doc_ids,
-            )
-
-            modified_weights = base_node_weights.copy()
-            for name, vid in all_discovered.items():
-                modified_weights[vid] += _degree_adaptive_weight(index, vid, DEFAULT_ENTITY_SEED_WEIGHT)
-
-            # Build overlay graph with bridge edges
-            temp_edges = []
-            selected_pairs = set()
-
-            # Bridge → seed edges (from mini-PPR)
-            for d_vid, s_vid, score in ppr_connections:
-                bridge_weight = _degree_adaptive_weight(index, d_vid, 1.0)
-                temp_edges.append((d_vid, s_vid, bridge_weight))
-                selected_pairs.add((d_vid, s_vid))
-
-            # Inter-discovered edges (always connect bridge entities to each other)
-            d_list = list(all_discovered.values())
-            for i, v1 in enumerate(d_list):
-                for v2 in d_list[i+1:]:
-                    w = max(_degree_adaptive_weight(index, v1, 1.0),
-                            _degree_adaptive_weight(index, v2, 1.0))
-                    temp_edges.append((v1, v2, w))
-
-            working_graph = _build_overlay_graph(index, temp_edges) if temp_edges else index.graph
-
-            # Run expansion PPR
-            modified_weights = np.where(np.isnan(modified_weights) | (modified_weights < 0), 0, modified_weights)
-            if modified_weights.sum() > 0:
-                # Pad modified_weights if overlay graph has more vertices
-                if working_graph.vcount() > len(modified_weights):
-                    padded = np.zeros(working_graph.vcount())
-                    padded[:len(modified_weights)] = modified_weights
-                    modified_weights = padded
-
-                boosted_ppr = working_graph.personalized_pagerank(
-                    vertices=range(working_graph.vcount()),
-                    damping=EXPANSION_DAMPING,
-                    directed=False,
-                    weights='weight' if 'weight' in working_graph.es.attributes() else None,
-                    reset=modified_weights,
-                    implementation='prpack',
-                )
-
-                # Extract passage scores and rank
-                boosted_doc_scores = np.array([boosted_ppr[idx] for idx in index.passage_node_idxs])
-                boosted_doc_ids = np.argsort(boosted_doc_scores)[::-1]
-
-                # Expansion PPR RRF (weight 1.0, vs pipeline 0.5)
-                for rank, doc_id in enumerate(boosted_doc_ids):
-                    rrf_scores[doc_id] += round_weight / (rrf_k + rank + 1)
-
-                logger.info(
-                    f"  Expansion PPR: {len(all_discovered)} entities, "
-                    f"bridge edges: {len(selected_pairs)}, temp edges: {len(temp_edges)}, "
-                    f"round_weight: {round_weight:.1f}"
-                )
-
-        # Current top docs from RRF
         final_sorted_ids = np.argsort(rrf_scores)[::-1]
         top_docs = [index.passages[index.passage_keys[idx]] for idx in final_sorted_ids[:10]]
 
-        # Last round: skip reasoning
+        round_diag = {
+            "round_idx": round_i,
+            "query": current_query,
+            "base_top_doc_ids": [int(idx) for idx in sorted_doc_ids[:10]],
+            "rrf_top_doc_ids": [int(idx) for idx in final_sorted_ids[:10]],
+            "bridge_edges": 0,
+            "temp_edges": 0,
+            "mini_ppr_seed_names": [],
+            "selected_seed_names": [],
+            "selected_seed_total": int(np.count_nonzero(selected_seed_weights)),
+            "overlay_edge_total": len(overlay_edge_weights),
+            "discovered_entities_total": sorted(all_discovered.keys()),
+        }
+        if gold_docs is not None:
+            round_diag["base_recall"] = {
+                "R@1": recall_at_k(base_top_docs, gold_docs, 1),
+                "R@2": recall_at_k(base_top_docs, gold_docs, 2),
+                "R@5": recall_at_k(base_top_docs, gold_docs, 5),
+                "R@10": recall_at_k(base_top_docs, gold_docs, 10),
+            }
+            round_diag["rrf_recall"] = {
+                "R@1": recall_at_k(top_docs, gold_docs, 1),
+                "R@2": recall_at_k(top_docs, gold_docs, 2),
+                "R@5": recall_at_k(top_docs, gold_docs, 5),
+                "R@10": recall_at_k(top_docs, gold_docs, 10),
+            }
+
         if round_i == max_rounds - 1:
+            round_diag["stop"] = False
+            round_diag["rewritten_query"] = ""
+            round_diag["new_discovered_entities"] = []
+            round_diagnostics.append(round_diag)
             break
 
-        # Step 4: LLM reasoning with entity discovery
         try:
             reasoning_output = reason_and_rewrite(
                 original_query=question,
@@ -1031,161 +1167,102 @@ def iterative_retrieve(index, question: str, llm_client, max_rounds: int = 3,
             break
 
         reasoning_traces.append(reasoning_output.get("analysis", ""))
-
-        # Save full trajectory for this round
-        round_traj = {
-            "round": round_i,
-            "query": current_query,
-            "analysis": reasoning_output.get("analysis", ""),
-            "rewritten_query": reasoning_output.get("rewritten_query", ""),
-            "discovered_entities": reasoning_output.get("discovered_entities", []),
-            "should_stop": reasoning_output.get("should_stop", False),
-            "resolved_entities": {},
-            "top_doc_ids": [int(d) for d in final_sorted_ids[:10]],
-        }
+        round_diag["rewritten_query"] = reasoning_output.get("rewritten_query", "")
+        round_diag["new_discovered_entities"] = reasoning_output.get("discovered_entities", [])
+        round_diag["stop"] = reasoning_output.get("should_stop", False)
 
         if reasoning_output.get("should_stop", False):
             logger.info(f"  Reasoning stop at round {round_i}")
-            round_trajectories.append(round_traj)
+            round_diagnostics.append(round_diag)
             break
 
-        # Query rewrite
         new_query = reasoning_output.get("rewritten_query", "")
         if new_query and new_query != current_query:
             logger.info(f"  Round {round_i} rewrite: '{new_query[:60]}...'")
             current_query = new_query
 
-        # Entity seed expansion: resolve discovered entities to graph vertices
         discovered_entities = reasoning_output.get("discovered_entities", [])
         if discovered_entities:
             logger.info(f"  Discovered entities: {discovered_entities}")
             resolved = _resolve_entities_in_graph(index, discovered_entities)
             all_discovered.update(resolved)
             logger.info(f"  Total resolved entities: {len(all_discovered)}")
-            round_traj["resolved_entities"] = {name: int(vid) for name, vid in resolved.items()}
+            round_diag["discovered_entities_total"] = sorted(all_discovered.keys())
 
-        round_trajectories.append(round_traj)
+            effective_seed_weights = base_node_weights.copy() if base_node_weights is not None else np.zeros(index.graph.vcount())
+            if np.count_nonzero(selected_seed_weights):
+                effective_seed_weights = effective_seed_weights + selected_seed_weights
+            if hop5_vids is not None:
+                mask = np.zeros_like(effective_seed_weights)
+                mask[hop5_vids] = 1.0
+                effective_seed_weights = effective_seed_weights * mask
 
-    # Final ranking from RRF
+            existing_seeds = _get_existing_seed_ids(index, effective_seed_weights)
+            ppr_connections = _mini_ppr_select_seeds(
+                index,
+                discovered_vertex_ids=all_discovered,
+                existing_seed_vertex_ids=existing_seeds,
+                round0_top_doc_ids=round0_top_doc_ids,
+                graph=working_graph,
+            )
+
+            selected_seed_vids = sorted({s_vid for _, s_vid, _ in ppr_connections})
+            selected_seed_names = sorted(index.graph.vs[s_vid]["content"] for s_vid in selected_seed_vids)[:10]
+            for s_vid in selected_seed_vids:
+                selected_seed_weights[s_vid] += _degree_adaptive_weight(index, s_vid, DEFAULT_ENTITY_SEED_WEIGHT)
+
+            new_bridge_edges = 0
+            for d_vid, s_vid, _ in ppr_connections:
+                bridge_weight = _degree_adaptive_weight(index, d_vid, 1.0)
+                edge = (min(d_vid, s_vid), max(d_vid, s_vid), bridge_weight)
+                key = (edge[0], edge[1])
+                prev = overlay_edge_weights.get(key)
+                if prev is None or bridge_weight > prev[2]:
+                    overlay_edge_weights[key] = edge
+                new_bridge_edges += 1
+
+            d_list = list(all_discovered.values())
+            for i, v1 in enumerate(d_list):
+                for v2 in d_list[i + 1:]:
+                    w = max(
+                        _degree_adaptive_weight(index, v1, 1.0),
+                        _degree_adaptive_weight(index, v2, 1.0),
+                    )
+                    edge = (min(v1, v2), max(v1, v2), w)
+                    key = (edge[0], edge[1])
+                    prev = overlay_edge_weights.get(key)
+                    if prev is None or w > prev[2]:
+                        overlay_edge_weights[key] = edge
+
+            round_diag["bridge_edges"] = len(selected_seed_vids)
+            round_diag["temp_edges"] = new_bridge_edges
+            round_diag["mini_ppr_seed_names"] = selected_seed_names
+            round_diag["selected_seed_names"] = selected_seed_names
+            round_diag["selected_seed_total"] = int(np.count_nonzero(selected_seed_weights))
+            round_diag["overlay_edge_total"] = len(overlay_edge_weights)
+            logger.info(
+                f"  Overlay update: discovered={len(all_discovered)}, "
+                f"selected_seeds={len(selected_seed_vids)}, new_bridge_edges={new_bridge_edges}, "
+                f"overlay_edges_total={len(overlay_edge_weights)}"
+            )
+
+        round_diagnostics.append(round_diag)
+
     final_sorted_ids = np.argsort(rrf_scores)[::-1]
     retrieved_docs = [index.passages[index.passage_keys[idx]] for idx in final_sorted_ids]
 
-    # LLM reasoning reranker: reorder docs based on reasoning trajectory
-    if reasoning_traces:
-        reranked = _llm_reasoning_rerank(question, retrieved_docs[:10], reasoning_traces, llm_client)
+    rerank_limit = min(10, len(retrieved_docs))
+    if rerank_limit > 1:
+        reranked = _llm_reasoning_rerank(question, retrieved_docs[:rerank_limit], reasoning_traces, llm_client)
         if reranked is not None:
-            # Replace top docs with reranked, keep rest
-            retrieved_docs = reranked + retrieved_docs[len(reranked):]
+            retrieved_docs = reranked + retrieved_docs[rerank_limit:]
 
-    return retrieved_docs, reasoning_traces, round_trajectories
+    return retrieved_docs, reasoning_traces, round_diagnostics
 
 
 def _compute_base_node_weights(index, query: str) -> np.ndarray:
-    """Re-derive the base node weights that retrieve() would compute.
-
-    This mirrors the seed computation in NERIndex.retrieve() so we can
-    use the weights for expansion PPR in later rounds.
-    """
-    use_instruction = getattr(index.embedding_model, 'supports_instruction', False)
-    sent_instr = QUERY_INSTRUCTION_SENTENCE if use_instruction else ''
-    pass_instr = QUERY_INSTRUCTION_PASSAGE if use_instruction else ''
-    query_emb_sentence = l2_normalize(index.embedding_model.batch_encode(
-        [query], instruction=sent_instr))
-    query_emb_passage = l2_normalize(index.embedding_model.batch_encode(
-        [query], instruction=pass_instr))
-
-    node_weights = np.zeros(index.graph.vcount())
-    sent_id_to_idx = {sid: i for i, sid in enumerate(index.sentence_ids)}
-
-    if index.pair_embeddings is not None and len(index.pair_embeddings) > 0:
-        pair_scores = (index.pair_embeddings @ query_emb_sentence.T).flatten()
-        pair_scores = min_max_normalize(pair_scores)
-
-        sent_scores_all = None
-        if index.sentence_embeddings is not None and len(index.sentence_embeddings) > 0:
-            sent_scores_all = (index.sentence_embeddings @ query_emb_sentence.T).flatten()
-            sent_scores_all = min_max_normalize(sent_scores_all)
-
-        combined_scores = np.zeros(len(index.pairs))
-        for pi, (t1, k1, t2, k2, sent_id) in enumerate(index.pairs):
-            p_score = pair_scores[pi]
-            s_score = 0.0
-            if sent_scores_all is not None:
-                si = sent_id_to_idx.get(sent_id, -1)
-                if si >= 0:
-                    s_score = sent_scores_all[si]
-            combined_scores[pi] = 0.5 * p_score + 0.5 * s_score
-
-        # MMR selection (same as retrieve)
-        pair_norms = np.linalg.norm(index.pair_embeddings, axis=1, keepdims=True)
-        pair_norms = np.where(pair_norms == 0, 1, pair_norms)
-        normed_pairs = index.pair_embeddings / pair_norms
-
-        candidate_size = min(30, len(index.pairs))
-        candidate_idxs = np.argsort(combined_scores)[::-1][:candidate_size].tolist()
-
-        top_pair_idxs = []
-        selected_embs = []
-        link_top_k = 5
-        mmr_lambda = 0.7
-        for _ in range(link_top_k):
-            if not candidate_idxs:
-                break
-            if not selected_embs:
-                best = candidate_idxs[0]
-            else:
-                selected_matrix = np.array(selected_embs)
-                best_mmr = -float('inf')
-                best = candidate_idxs[0]
-                for ci in candidate_idxs:
-                    relevance = combined_scores[ci]
-                    sim = np.max(normed_pairs[ci] @ selected_matrix.T)
-                    mmr_score = mmr_lambda * relevance - (1 - mmr_lambda) * sim
-                    if mmr_score > best_mmr:
-                        best_mmr = mmr_score
-                        best = ci
-            top_pair_idxs.append(best)
-            selected_embs.append(normed_pairs[best])
-            candidate_idxs.remove(best)
-
-        ent_occur_count = np.zeros(index.graph.vcount())
-        ent_max_score = np.zeros(index.graph.vcount())
-        for pi in top_pair_idxs:
-            t1, k1, t2, k2, sent_id = index.pairs[pi]
-            score = combined_scores[pi]
-            for ent_key in [k1, k2]:
-                ent_idx = index.node_name_to_idx.get(ent_key)
-                if ent_idx is not None:
-                    n_passages = max(len(index.entity_to_passages[ent_key]), 1)
-                    weighted_score = score / n_passages
-                    node_weights[ent_idx] += weighted_score
-                    ent_occur_count[ent_idx] += 1
-                    if weighted_score > ent_max_score[ent_idx]:
-                        ent_max_score[ent_idx] = weighted_score
-
-        for idx in index.entity_node_idxs:
-            if ent_occur_count[idx] > 0:
-                avg = node_weights[idx] / ent_occur_count[idx]
-                node_weights[idx] = (ent_max_score[idx] + avg) / 2.0
-
-        # Top-k entity filtering
-        entity_top_k = 5
-        entity_weights = [(idx, node_weights[idx]) for idx in index.entity_node_idxs if node_weights[idx] > 0]
-        if len(entity_weights) > entity_top_k:
-            entity_weights.sort(key=lambda x: x[1], reverse=True)
-            keep_idxs = set(idx for idx, _ in entity_weights[:entity_top_k])
-            for idx in index.entity_node_idxs:
-                if idx not in keep_idxs:
-                    node_weights[idx] = 0.0
-
-    # Passage weights
-    if index.passage_embeddings is not None and len(index.passage_embeddings) > 0:
-        passage_scores = (index.passage_embeddings @ query_emb_passage.T).flatten()
-        passage_scores = min_max_normalize(passage_scores) * 0.05
-        for i, p_idx in enumerate(index.passage_node_idxs):
-            node_weights[p_idx] = passage_scores[i]
-
-    return node_weights
+    """Return the same base node weights used by retrieve()."""
+    return index._compute_node_weights(query=query)
 
 
 # ── IRCoT reasoning (ported from feature/ircot-baseline) ─────────
@@ -1292,7 +1369,7 @@ class SimpleLLM:
     def __init__(self, model_name, base_url, max_retries=3, retry_delay=10):
         from openai import OpenAI
         self.model_name = model_name
-        self.client = OpenAI(base_url=base_url, timeout=60)
+        self.client = OpenAI(base_url=base_url, timeout=120)
         self.max_retries = max_retries
         self.retry_delay = retry_delay
 
@@ -1321,12 +1398,13 @@ def run_evaluation(args):
     import torch
     torch.manual_seed(args.seed)
 
-    data = json.load(open(args.data_path))
-    if args.sample_limit and args.sample_limit < len(data):
-        data = data[:args.sample_limit]
-    logger.info(f"Loaded {len(data)} samples")
+    all_data = json.load(open(args.data_path))
+    if args.sample_limit and args.sample_limit < len(all_data):
+        data = all_data[:args.sample_limit]
+    else:
+        data = all_data
+    logger.info(f"Loaded {len(data)} samples (total {len(all_data)} in dataset)")
 
-    # Models
     embedding_model_name = os.getenv(
         "EMBEDDING_MODEL_NAME", "Transformers/sentence-transformers/all-MiniLM-L6-v2"
     )
@@ -1352,7 +1430,6 @@ def run_evaluation(args):
         base_url=aliyun_base_url,
     )
 
-    # Load NER cache if available
     ner_cache_path = args.ner_cache
     ner_cache = {}
     if ner_cache_path and os.path.exists(ner_cache_path):
@@ -1360,7 +1437,6 @@ def run_evaluation(args):
         ner_cache = json.load(open(ner_cache_path))
         logger.info(f"  {len(ner_cache)} cached entries")
 
-    # Also try to extract entities from existing OpenIE cache
     openie_cache = {}
     if args.openie_cache and os.path.exists(args.openie_cache):
         logger.info(f"Loading OpenIE cache for entity extraction: {args.openie_cache}")
@@ -1372,10 +1448,10 @@ def run_evaluation(args):
                 parts = doc["passage"].split("\n", 1)
                 text_key = parts[1] if len(parts) > 1 else doc["passage"]
 
-            # Extract entities from OpenIE results
-            entities = doc.get("extracted_entities", [])
-            if not entities and doc.get("extracted_triples"):
-                # Fallback: extract from triples
+            entities = []
+            if "named_entities" in doc and doc["named_entities"]:
+                entities = doc["named_entities"]
+            elif "extracted_triples" in doc:
                 ent_set = set()
                 for t in doc["extracted_triples"]:
                     if len(t) >= 3:
@@ -1385,38 +1461,42 @@ def run_evaluation(args):
             openie_cache[text_key] = entities
         logger.info(f"  {len(openie_cache)} docs with entities from OpenIE")
 
-    # Output
     save_dir = "outputs/musique_ner_pipeline_eval"
     os.makedirs(save_dir, exist_ok=True)
     mode = getattr(args, 'mode', 'base')
-    if mode == 'ircot':
-        output_tag = f"_ircot_rounds{args.max_rounds}"
-    elif args.max_rounds > 1:
-        output_tag = f"_rounds{args.max_rounds}"
-    else:
-        output_tag = ""
-    output_path = os.path.join(save_dir, f"comparison_results{output_tag}.json")
-
-    # Load previous results for retry mode
-    prev_results = {}
-    if getattr(args, 'retry_from', None) and os.path.exists(args.retry_from):
-        prev_data = json.load(open(args.retry_from))
-        for r in prev_data.get("results", []):
-            if r.get("ner_answer") != "Error":
-                prev_results[r["idx"]] = r
-        logger.info(f"Retry mode: loaded {len(prev_results)} successful results from {args.retry_from}")
-        failed_idxs = [r["idx"] for r in prev_data.get("results", []) if r.get("ner_answer") == "Error"]
-        logger.info(f"  Will rerun {len(failed_idxs)} failed samples: {failed_idxs}")
+    output_path = _make_results_output_path(save_dir, mode, args.max_rounds)
 
     all_results = []
     total_start = time.time()
 
-    for idx, sample in enumerate(data):
-        # Skip successful samples in retry mode
-        if idx in prev_results:
-            all_results.append(prev_results[idx])
-            continue
+    global_index = None
+    if getattr(args, 'global_index', False):
+        all_docs = []
+        seen = set()
+        for sample in all_data:  # use ALL samples for global corpus, not just data[:sample_limit]
+            for para in sample.get("paragraphs", []):
+                t = para.get("paragraph_text", "")
+                if t and t not in seen:
+                    seen.add(t)
+                    all_docs.append(t)
 
+        global_ner_results = {}
+        for doc_text in all_docs:
+            if doc_text in ner_cache:
+                global_ner_results[doc_text] = ner_cache[doc_text]
+            elif doc_text in openie_cache:
+                global_ner_results[doc_text] = openie_cache[doc_text]
+            else:
+                entities = llm_ner(doc_text, llm_client)
+                global_ner_results[doc_text] = entities
+                ner_cache[doc_text] = entities
+
+        logger.info(f"Building GLOBAL NER index for {len(all_docs)} passages...")
+        global_index = NERIndex(embedding_model=emb_model)
+        global_index.build(all_docs, global_ner_results)
+        logger.info(f"  Global index: {global_index.graph.vcount()} nodes, {global_index.graph.ecount()} edges")
+
+    for idx, sample in enumerate(data):
         question = sample.get("question", "")
         paragraphs = sample.get("paragraphs", [])
         answer = sample.get("answer", "")
@@ -1427,53 +1507,46 @@ def run_evaluation(args):
             for para in paragraphs
             if para.get("is_supporting", False)
         ]
-        gold_answers = [answer] + answer_aliases
 
         logger.info(f"[{idx+1}/{len(data)}] {question[:80]}...")
 
+        index = None
+        reasoning_traces = []
+        round_diagnostics = []
         try:
-            # Step 1: Get NER results for each doc
-            ner_results = {}
-            for doc_text in docs:
-                if doc_text in ner_cache:
-                    ner_results[doc_text] = ner_cache[doc_text]
-                elif doc_text in openie_cache:
-                    ner_results[doc_text] = openie_cache[doc_text]
-                else:
-                    # Run LLM NER
-                    entities = llm_ner(doc_text, llm_client)
-                    ner_results[doc_text] = entities
-                    ner_cache[doc_text] = entities
+            if global_index is None:
+                ner_results = {}
+                for doc_text in docs:
+                    if doc_text in ner_cache:
+                        ner_results[doc_text] = ner_cache[doc_text]
+                    elif doc_text in openie_cache:
+                        ner_results[doc_text] = openie_cache[doc_text]
+                    else:
+                        entities = llm_ner(doc_text, llm_client)
+                        ner_results[doc_text] = entities
+                        ner_cache[doc_text] = entities
 
-            # Step 2: Build index
-            index = NERIndex(embedding_model=emb_model)
-            index.build(docs, ner_results)
+                index = NERIndex(embedding_model=emb_model)
+                index.build(docs, ner_results)
+            else:
+                index = global_index
 
-            # Step 3: Retrieve
-            reasoning_traces = []
-            round_trajectories = []
             if mode == 'ircot':
-                # IRCoT: iterative retrieval with chain-of-thought
                 retrieved_docs, reasoning_traces = ircot_retrieve(
                     index, question, llm_client, max_rounds=args.max_rounds)
             elif args.max_rounds > 1:
-                # Graph-reshape reasoning: entity discovery + seed expansion + RRF
-                retrieved_docs, reasoning_traces, round_trajectories = iterative_retrieve(
-                    index, question, llm_client, max_rounds=args.max_rounds)
+                retrieved_docs, reasoning_traces, round_diagnostics = iterative_retrieve(
+                    index, question, llm_client, max_rounds=args.max_rounds, gold_docs=gold_docs)
             else:
-                # Single-round base retrieval
                 sorted_doc_ids, sorted_doc_scores = index.retrieve(question)
                 retrieved_docs = [index.passages[index.passage_keys[did]] for did in sorted_doc_ids]
 
-            # Step 4: Compute recall
             r1 = recall_at_k(retrieved_docs, gold_docs, 1)
             r2 = recall_at_k(retrieved_docs, gold_docs, 2)
             r5 = recall_at_k(retrieved_docs, gold_docs, 5)
             r10 = recall_at_k(retrieved_docs, gold_docs, 10)
 
-            # Step 5: QA
             qa_answer = llm_qa(question, retrieved_docs[:5], llm_client)
-
             em_correct = check_em(qa_answer, answer, answer_aliases)
             f1_score = check_f1(qa_answer, answer, answer_aliases)
 
@@ -1483,6 +1556,7 @@ def run_evaluation(args):
             traceback.print_exc()
             retrieved_docs = []
             reasoning_traces = []
+            round_diagnostics = []
             r1 = r2 = r5 = r10 = 0.0
             qa_answer = "Error"
             em_correct = False
@@ -1498,27 +1572,29 @@ def run_evaluation(args):
             "ner_f1": round(f1_score, 4),
             "ner_recall": {"R@1": r1, "R@2": r2, "R@5": r5, "R@10": r10},
             "reasoning_traces": reasoning_traces,
-            "round_trajectories": round_trajectories,
-            "n_entities": len(index.entity_keys) if hasattr(index, 'entity_keys') else 0,
-            "n_sentences": len(index.sentences) if hasattr(index, 'sentences') else 0,
-            "graph_nodes": index.graph.vcount() if index.graph else 0,
-            "graph_edges": index.graph.ecount() if index.graph else 0,
+            "round_diagnostics": round_diagnostics,
+            "n_entities": len(index.entity_keys) if index is not None and hasattr(index, 'entity_keys') else 0,
+            "n_sentences": len(index.sentences) if index is not None and hasattr(index, 'sentences') else 0,
+            "graph_nodes": index.graph.vcount() if index is not None and index.graph else 0,
+            "graph_edges": index.graph.ecount() if index is not None and index.graph else 0,
         }
         all_results.append(result)
 
         em_str = "Y" if em_correct else "N"
         logger.info(f"  EM={em_str} F1={f1_score:.2f} R@5={r5:.2f} | '{qa_answer[:50]}' | Gold='{answer}'")
 
-        # Cleanup
-        del index
-        gc.collect()
+        if global_index is None and index is not None:
+            del index
+            gc.collect()
 
-        # Save progress every 5 samples
         if (idx + 1) % 5 == 0 or (idx + 1) == len(data):
             n = len(all_results)
             avg_em = sum(r["ner_em"] for r in all_results) / n
             avg_f1 = sum(r["ner_f1"] for r in all_results) / n
+            avg_r1 = sum(r["ner_recall"]["R@1"] for r in all_results) / n
+            avg_r2 = sum(r["ner_recall"]["R@2"] for r in all_results) / n
             avg_r5 = sum(r["ner_recall"]["R@5"] for r in all_results) / n
+            avg_r10 = sum(r["ner_recall"]["R@10"] for r in all_results) / n
             logger.info(f"  >>> Progress: {n}/{len(data)} | EM={avg_em:.3f} | F1={avg_f1:.3f} | R@5={avg_r5:.3f}")
 
             with open(output_path, "w") as f:
@@ -1535,28 +1611,31 @@ def run_evaluation(args):
                         "ner_em": round(avg_em, 4),
                         "ner_f1": round(avg_f1, 4),
                         "ner_recall": {
-                            "R@1": round(sum(r["ner_recall"]["R@1"] for r in all_results) / n, 4),
-                            "R@2": round(sum(r["ner_recall"]["R@2"] for r in all_results) / n, 4),
+                            "R@1": round(avg_r1, 4),
+                            "R@2": round(avg_r2, 4),
                             "R@5": round(avg_r5, 4),
-                            "R@10": round(sum(r["ner_recall"]["R@10"] for r in all_results) / n, 4),
+                            "R@10": round(avg_r10, 4),
                         },
                     },
                     "results": all_results,
                 }, f, indent=2)
 
-    # Save NER cache
-    if ner_cache:
-        cache_out = os.path.join(save_dir, "ner_cache.json")
-        with open(cache_out, "w") as f:
-            json.dump(ner_cache, f)
-        logger.info(f"Saved NER cache: {cache_out} ({len(ner_cache)} entries)")
+    if ner_cache_path:
+        existing = None
+        if os.path.exists(ner_cache_path):
+            with open(ner_cache_path) as f:
+                existing = f.read()
+        new_payload = json.dumps(ner_cache, ensure_ascii=False, indent=2, sort_keys=True)
+        if existing != new_payload:
+            with open(ner_cache_path, "w") as f:
+                f.write(new_payload)
+            logger.info(f"Saved NER cache: {ner_cache_path} ({len(ner_cache)} entries)")
 
-    # Final summary
     n = len(all_results)
     avg_em = sum(r["ner_em"] for r in all_results) / n
     avg_f1 = sum(r["ner_f1"] for r in all_results) / n
-    avg_r5 = sum(r["ner_recall"]["R@5"] for r in all_results) / n
     avg_r1 = sum(r["ner_recall"]["R@1"] for r in all_results) / n
+    avg_r5 = sum(r["ner_recall"]["R@5"] for r in all_results) / n
 
     total_time = time.time() - total_start
     print(f"\n{'='*60}")
@@ -1585,8 +1664,8 @@ def main():
     parser.add_argument("--mode", type=str, default="base",
                         choices=["base", "reasoning", "ircot"],
                         help="Reasoning mode: base, reasoning (graph-reshape), ircot")
-    parser.add_argument("--retry_from", type=str, default=None,
-                        help="Path to previous results JSON. Rerun only failed samples (ner_answer='Error') and keep successful ones.")
+    parser.add_argument("--global_index", action="store_true",
+                        help="Build one global index from all samples' passages instead of per-sample")
     args = parser.parse_args()
     # For reasoning/ircot, ensure max_rounds > 1
     if args.mode in ("reasoning", "ircot") and args.max_rounds <= 1:

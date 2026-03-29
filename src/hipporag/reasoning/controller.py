@@ -527,7 +527,7 @@ class ReasoningController:
                 # Single merged PPR: pipeline seeds + bridge seeds on overlay graph
                 sorted_doc_ids, sorted_doc_scores = hip.run_ppr(
                     merged_weights,
-                    damping=EXPANSION_DAMPING,
+                    damping=EXPANSION_DAMPING,  # 0.7
                     graph=working_graph,
                 )
 
@@ -586,7 +586,7 @@ class ReasoningController:
             reasoning_output = self.query_rewriter.reason_and_rewrite(
                 original_query=state.original_query,
                 current_query=state.current_query,
-                retrieved_docs=top_k_docs[:10],
+                retrieved_docs=top_k_docs[:5],
                 round_idx=round_i,
                 previous_traces=state.reasoning_traces,
             )
