@@ -263,7 +263,7 @@ def run_evaluation(data, sample_limit, max_rounds, openie_cache=None):
                 text_key = parts[1] if len(parts) > 1 else doc["passage"]
             openie_text_lookup[text_key] = doc
         logger.info(f"Loaded {len(openie_text_lookup)} docs from OpenIE cache")
-    output_path = os.path.join(save_dir, "comparison_results.json")
+    output_path = os.path.join(save_dir, "comparison_results_fullcorpus.json")
     all_results = []
 
     # Check for existing progress
