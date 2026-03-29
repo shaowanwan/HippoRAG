@@ -409,22 +409,36 @@ class NERIndex:
         n_ep = len(edges) - n_cooccur
         logger.info(f"  {n_ep} entity-passage edges")
 
-        # 3) Synonymy edges (entity-entity, embedding similarity > threshold)
+        # 3) Synonymy edges (entity-entity, batched KNN like HippoRAG)
         syn_threshold = 0.8
+        syn_topk = 10
         if len(self.entity_keys) > 1 and self.entity_embeddings is not None and len(self.entity_embeddings) > 0:
-            logger.info(f"  Computing synonymy edges (threshold={syn_threshold})...")
-            norms = np.linalg.norm(self.entity_embeddings, axis=1, keepdims=True)
-            norms = np.where(norms == 0, 1, norms)
-            normed = self.entity_embeddings / norms
-            sim_matrix = normed @ normed.T
+            logger.info(f"  Computing synonymy edges (threshold={syn_threshold}, topk={syn_topk})...")
+            import torch
+            device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+            emb_tensor = torch.tensor(self.entity_embeddings, dtype=torch.float32)
+            emb_tensor = torch.nn.functional.normalize(emb_tensor, dim=1)
 
             n_before = len(edges)
-            for i in range(len(self.entity_keys)):
-                for j in range(i + 1, len(self.entity_keys)):
-                    score = sim_matrix[i, j]
-                    if score >= syn_threshold:
-                        edges.append((i, j))
-                        weights.append(float(score))
+            batch_size = 1000
+            k = min(syn_topk + 1, len(self.entity_keys))  # +1 to skip self
+
+            for start in range(0, len(self.entity_keys), batch_size):
+                end = min(start + batch_size, len(self.entity_keys))
+                query_batch = emb_tensor[start:end].to(device)
+                sims = query_batch @ emb_tensor.T.to(device)  # (batch, n_entities)
+                topk_scores, topk_idxs = torch.topk(sims, k=k, dim=1)
+
+                for bi in range(end - start):
+                    i = start + bi
+                    for ki in range(k):
+                        j = int(topk_idxs[bi, ki])
+                        score = float(topk_scores[bi, ki])
+                        if j > i and score >= syn_threshold:  # j > i to avoid duplicates
+                            edges.append((i, j))
+                            weights.append(score)
+
             logger.info(f"  {len(edges) - n_before} synonymy edges")
 
         if edges:
