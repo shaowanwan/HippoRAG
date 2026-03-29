@@ -1455,9 +1455,13 @@ def run_evaluation(args):
         os.environ["OPENAI_API_KEY"] = "sk-396199ed7af84eff8a0cf7a71b797601"
 
     logger.info(f"Loading embedding model: {embedding_model_name}")
+    # Create a minimal config for batch_size control (large models need smaller batch)
+    emb_batch_size = int(os.getenv("EMBEDDING_BATCH_SIZE", "64"))
+    from types import SimpleNamespace
+    _emb_config = SimpleNamespace(embedding_batch_size=emb_batch_size)
     emb_model = _get_embedding_model_class(
         embedding_model_name=embedding_model_name
-    )(embedding_model_name=embedding_model_name)
+    )(global_config=_emb_config, embedding_model_name=embedding_model_name)
 
     logger.info(f"Setting up LLM: {llm_model_name}")
     llm_client = SimpleLLM(
