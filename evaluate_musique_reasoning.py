@@ -293,7 +293,9 @@ def run_evaluation(data, sample_limit, max_rounds, openie_cache=None):
     # Global index dir follows HippoRAG 2 convention: outputs/musique/{llm}_{embedding}
     llm_tag = llm_model_name.replace("/", "_")
     emb_tag = embedding_model_name.replace("/", "_")
-    global_save_dir = os.path.join("outputs", "musique", f"{llm_tag}_{emb_tag}")
+    syn_threshold = float(os.getenv("SYNONYMY_THRESHOLD", "0.8"))
+    syn_suffix = f"_syn{syn_threshold}" if syn_threshold != 0.8 else ""
+    global_save_dir = os.path.join("outputs", "musique", f"{llm_tag}_{emb_tag}{syn_suffix}")
     logger.info(f"Global index dir: {global_save_dir}")
     from src.hipporag.utils.config_utils import BaseConfig
     global_config = BaseConfig(
@@ -309,7 +311,8 @@ def run_evaluation(data, sample_limit, max_rounds, openie_cache=None):
         max_qa_steps=3,
         qa_top_k=5,
         graph_type="facts_and_sim_passage_node_unidirectional",
-        embedding_batch_size=2,
+        embedding_batch_size=int(os.getenv("EMBEDDING_BATCH_SIZE", "8")),
+        synonymy_edge_sim_threshold=float(os.getenv("SYNONYMY_THRESHOLD", "0.8")),
         synonymy_edge_query_batch_size=500,
         synonymy_edge_key_batch_size=2000,
         corpus_len=len(all_docs),
