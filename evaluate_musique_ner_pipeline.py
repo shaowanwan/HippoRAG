@@ -410,7 +410,7 @@ class NERIndex:
         logger.info(f"  {n_ep} entity-passage edges")
 
         # 3) Synonymy edges (entity-entity, batched KNN like HippoRAG)
-        syn_threshold = 0.8
+        syn_threshold = float(os.environ.get("SYNONYMY_THRESHOLD", "0.8"))
         syn_topk = 10
         if len(self.entity_keys) > 1 and self.entity_embeddings is not None and len(self.entity_embeddings) > 0:
             logger.info(f"  Computing synonymy edges (threshold={syn_threshold}, topk={syn_topk})...")
@@ -1455,13 +1455,14 @@ def run_evaluation(args):
         os.environ["OPENAI_API_KEY"] = "sk-396199ed7af84eff8a0cf7a71b797601"
 
     logger.info(f"Loading embedding model: {embedding_model_name}")
-    # Create a minimal config for batch_size control (large models need smaller batch)
-    emb_batch_size = int(os.getenv("EMBEDDING_BATCH_SIZE", "64"))
-    from types import SimpleNamespace
-    _emb_config = SimpleNamespace(embedding_batch_size=emb_batch_size)
     emb_model = _get_embedding_model_class(
         embedding_model_name=embedding_model_name
-    )(global_config=_emb_config, embedding_model_name=embedding_model_name)
+    )(embedding_model_name=embedding_model_name)
+    # Override batch_size for large models (GTE-Qwen2-7B needs smaller batch on L40s)
+    emb_batch_size = int(os.getenv("EMBEDDING_BATCH_SIZE", "0"))
+    if emb_batch_size > 0:
+        emb_model.batch_size = emb_batch_size
+        logger.info(f"  Overriding embedding batch_size to {emb_batch_size}")
 
     logger.info(f"Setting up LLM: {llm_model_name}")
     llm_client = SimpleLLM(
@@ -1531,7 +1532,9 @@ def run_evaluation(args):
                 ner_cache[doc_text] = entities
 
         # Check for cached global index
-        cache_path = os.path.join(save_dir, "global_ner_index.pkl")
+        _syn_th = float(os.environ.get("SYNONYMY_THRESHOLD", "0.8"))
+        _syn_tag = f"_syn{_syn_th}" if _syn_th != 0.8 else ""
+        cache_path = os.path.join(save_dir, f"global_ner_index{_syn_tag}.pkl")
         if os.path.exists(cache_path):
             global_index = NERIndex.load(cache_path, embedding_model=emb_model)
         else:
