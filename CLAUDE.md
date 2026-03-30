@@ -25,7 +25,11 @@
 - Output files should be named/organized by parameter config (e.g., `comparison_results_top5_oneshot.json`), so different configs don't overwrite each other. Same-config reruns can overwrite.
 - **汇报实验指标时至少包含三个：EM, F1, Recall@5**（不要只报EM）
 - **每天实验改的重要地方和实验结果（EM, F1, Recall, efficiency）都要记录到Obsidian笔记里**
-- **所有实验必须使用同一个 OpenIE cache**，确保 baseline 一致：`--openie_cache outputs/musique/openie_results_ner_qwen-plus.json`。不同 OpenIE 会产生不同知识图谱，导致 baseline R@5 差异高达 0.03。
+- **所有实验必须使用同一个 entity cache**，确保 baseline 一致。有两套 cache，分别对应两套 pipeline：
+  - HippoRAG OpenIE pipeline：`--openie_cache outputs/musique/openie_results_ner_qwen-plus.json`
+  - NER pipeline：`--ner_cache outputs/musique_ner_pipeline_eval/ner_cache.json`
+  - 不同 cache 会产生不同知识图谱，导致 baseline R@5 差异高达 0.03。
+- **严禁在实验运行中途修改代码后立刻启动新实验**：必须先确认旧实验已结束或已手动 kill，再改代码，再启动新实验。同时运行多个实验且代码版本不同，会导致结果混乱、无法溯源。
 
 ## Server Jobs
 - 提交新 job 前，主动删除之前失败 job 产生的无效样本结果文件，避免 resume 时加载坏数据

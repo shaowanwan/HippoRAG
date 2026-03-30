@@ -144,15 +144,16 @@ NER_ONE_SHOT_OUTPUT = """{"named_entities":
     ["Radio City", "India", "3 July 2001", "Hindi", "English", "May 2008", "PlanetRadiocity.com"]
 }"""
 
-QUERY_NER_SYSTEM = """Your task is to extract named entities from the given question.
+QUERY_NER_SYSTEM = """Your task is to extract the 2 most important named entities from the given question.
+These should be the key entities needed to answer the question.
 Respond with a JSON object like {"named_entities": ["entity1", "entity2"]}."""
 
-QUERY_NER_ONE_SHOT_INPUT = """When was Lady Godiva's birthplace abolished?"""
-QUERY_NER_ONE_SHOT_OUTPUT = """{"named_entities": ["Lady Godiva"]}"""
+QUERY_NER_ONE_SHOT_INPUT = """When was Neville A. Stanton's employer founded?"""
+QUERY_NER_ONE_SHOT_OUTPUT = """{"named_entities": ["Neville A. Stanton", "employer"]}"""
 
 
 def query_ner(question: str, llm_client) -> List[str]:
-    """Extract named entities from a question using LLM."""
+    """Extract top-2 key entities from a question using LLM."""
     messages = [
         {"role": "system", "content": QUERY_NER_SYSTEM},
         {"role": "user", "content": QUERY_NER_ONE_SHOT_INPUT},
@@ -167,7 +168,7 @@ def query_ner(question: str, llm_client) -> List[str]:
         match = _re.search(r'\{.*\}', response, _re.DOTALL)
         if match:
             data = json.loads(match.group())
-            return data.get("named_entities", [])
+            return data.get("named_entities", [])[:2]
         return []
     except Exception as e:
         logger.warning(f"Query NER failed: {e}")
@@ -204,9 +205,6 @@ def llm_ner(text: str, llm_client) -> List[str]:
 class NERIndex:
     """NER-based index: sentences, entities, entity-passage graph."""
 
-    PAIR_SENTENCE_TOPK = 256
-    PAIR_PASSAGE_TOPK = 48
-
     def __init__(self, embedding_model):
         self.embedding_model = embedding_model
         # Sentence store: {sentence_id: {text, passage_id, entities}}
@@ -230,9 +228,6 @@ class NERIndex:
         self.pairs = []
         # Sentence ID list (ordered)
         self.sentence_ids = []
-        self.sent_to_pair_indices = defaultdict(list)
-        self.passage_to_pair_indices = defaultdict(list)
-        self._pair_embedding_cache = {}
         # Graph
         self.graph = None
         self.node_name_to_idx = {}
@@ -324,13 +319,6 @@ class NERIndex:
 
         logger.info(f"  {len(self.pairs)} entity pairs from sentences")
 
-        self.sent_to_pair_indices = defaultdict(list)
-        self.passage_to_pair_indices = defaultdict(list)
-        for pair_idx, (_, _, _, _, sent_id) in enumerate(self.pairs):
-            self.sent_to_pair_indices[sent_id].append(pair_idx)
-            passage_id = self.sentences[sent_id]["passage_id"]
-            self.passage_to_pair_indices[passage_id].append(pair_idx)
-
         # Step 3: Compute embeddings
         logger.info("  Computing sentence embeddings...")
         sent_texts = [self.sentences[sid]["text"] for sid in self.sentence_ids]
@@ -352,9 +340,12 @@ class NERIndex:
         else:
             self.entity_embeddings = np.array([])
 
-        # Pair embeddings are computed lazily per query to avoid full materialization cost.
-        self.pair_embeddings = np.array([])
-        self._pair_embedding_cache = {}
+        logger.info("  Computing pair embeddings...")
+        if self.pairs:
+            pair_texts = [f"{p[0]} | {p[2]} | {self.sentences[p[4]]['text']}" for p in self.pairs]
+            self.pair_embeddings = self.embedding_model.batch_encode(pair_texts)
+        else:
+            self.pair_embeddings = np.array([])
 
         # Step 3: Build graph
         self._build_graph()
@@ -411,7 +402,7 @@ class NERIndex:
 
         # 3) Synonymy edges (entity-entity, batched KNN like HippoRAG)
         syn_threshold = float(os.environ.get("SYNONYMY_THRESHOLD", "0.8"))
-        syn_topk = 10
+        syn_topk = min(2047, len(self.entity_keys))
         if len(self.entity_keys) > 1 and self.entity_embeddings is not None and len(self.entity_embeddings) > 0:
             logger.info(f"  Computing synonymy edges (threshold={syn_threshold}, topk={syn_topk})...")
             import torch
@@ -445,69 +436,12 @@ class NERIndex:
             self.graph.add_edges(edges)
             self.graph.es["weight"] = weights
 
-    def _get_pair_text(self, pair_idx: int) -> str:
-        t1, _, t2, _, sent_id = self.pairs[pair_idx]
-        return f"{t1} | {t2} | {self.sentences[sent_id]['text']}"
-
-    def _get_pair_embeddings_for_indices(self, pair_indices: List[int]) -> np.ndarray:
-        if not pair_indices:
-            return np.array([])
-        ordered_indices = list(pair_indices)
-        missing_texts = []
-        missing_keys = []
-        for pi in ordered_indices:
-            pair_text = self._get_pair_text(pi)
-            if pair_text not in self._pair_embedding_cache:
-                missing_texts.append(pair_text)
-                missing_keys.append(pair_text)
-        if missing_texts:
-            logger.info(f"  Lazy pair embeddings: computing {len(missing_texts)} missing candidates")
-            new_embs = self.embedding_model.batch_encode(missing_texts)
-            for key, emb in zip(missing_keys, new_embs):
-                self._pair_embedding_cache[key] = emb
-        return np.vstack([self._pair_embedding_cache[self._get_pair_text(pi)] for pi in ordered_indices])
-
-    def _collect_candidate_pair_indices(self, sent_scores_all: np.ndarray,
-                                        passage_scores_all: Optional[np.ndarray] = None) -> List[int]:
-        if not self.pairs:
-            return []
-        if (
-            sent_scores_all is None
-            and passage_scores_all is None
-        ) or (
-            not self.sent_to_pair_indices and not self.passage_to_pair_indices
-        ):
-            return list(range(len(self.pairs)))
-
-        candidate_pair_idxs = []
-        seen = set()
-
-        if sent_scores_all is not None and self.sent_to_pair_indices:
-            top_sentence_k = min(self.PAIR_SENTENCE_TOPK, len(self.sentence_ids))
-            top_sent_idxs = np.argsort(sent_scores_all)[::-1][:top_sentence_k].tolist()
-            for si in top_sent_idxs:
-                sid = self.sentence_ids[si]
-                for pi in self.sent_to_pair_indices.get(sid, []):
-                    if pi not in seen:
-                        seen.add(pi)
-                        candidate_pair_idxs.append(pi)
-
-        if passage_scores_all is not None and self.passage_to_pair_indices:
-            top_passage_k = min(self.PAIR_PASSAGE_TOPK, len(self.passage_keys))
-            top_passage_local_idxs = np.argsort(passage_scores_all)[::-1][:top_passage_k].tolist()
-            for local_idx in top_passage_local_idxs:
-                passage_id = self.passage_keys[local_idx]
-                for pi in self.passage_to_pair_indices.get(passage_id, []):
-                    if pi not in seen:
-                        seen.add(pi)
-                        candidate_pair_idxs.append(pi)
-
-        return candidate_pair_idxs if candidate_pair_idxs else list(range(len(self.pairs)))
 
     def _compute_node_weights(self, query: str, passage_weight_scale: float = 0.05,
                               link_top_k: int = 5, pair_alpha: float = 0.5,
                               sent_alpha: float = 0.5, entity_top_k: int = 5,
-                              mmr_lambda: float = 0.7) -> np.ndarray:
+                              mmr_lambda: float = 0.7,
+                              query_entities: Optional[List[str]] = None) -> np.ndarray:
         use_instruction = getattr(self.embedding_model, 'supports_instruction', False)
         sent_instr = QUERY_INSTRUCTION_SENTENCE if use_instruction else ''
         pass_instr = QUERY_INSTRUCTION_PASSAGE if use_instruction else ''
@@ -527,60 +461,51 @@ class NERIndex:
             passage_scores = (self.passage_embeddings @ query_emb_passage.T).flatten()
             passage_scores = min_max_normalize(passage_scores)
 
-        if self.pairs:
+        if self.pairs and self.pair_embeddings is not None and len(self.pair_embeddings) > 0:
             top_pair_idxs = []
             combined_scores_lookup = {}
-            candidate_pair_idxs = self._collect_candidate_pair_indices(
-                sent_scores_all=sent_scores_all,
-                passage_scores_all=passage_scores,
-            )
-            candidate_pair_embs = self._get_pair_embeddings_for_indices(candidate_pair_idxs)
-            if len(candidate_pair_embs) > 0:
-                pair_scores = (candidate_pair_embs @ query_emb_sentence.T).flatten()
-                pair_scores = min_max_normalize(pair_scores)
 
-                combined_scores = np.zeros(len(candidate_pair_idxs))
-                for local_idx, pi in enumerate(candidate_pair_idxs):
-                    _, _, _, _, sent_id = self.pairs[pi]
-                    s_score = 0.0
-                    if sent_scores_all is not None:
-                        si = sent_id_to_idx.get(sent_id, -1)
-                        if si >= 0:
-                            s_score = sent_scores_all[si]
-                    combined_scores[local_idx] = pair_alpha * pair_scores[local_idx] + sent_alpha * s_score
+            # Full matrix multiply — same approach as HippoRAG fact matching
+            pair_scores = (self.pair_embeddings @ query_emb_sentence.T).flatten()
+            pair_scores = min_max_normalize(pair_scores)
 
-                pair_norms = np.linalg.norm(candidate_pair_embs, axis=1, keepdims=True)
-                pair_norms = np.where(pair_norms == 0, 1, pair_norms)
-                normed_pairs = candidate_pair_embs / pair_norms
+            combined_scores = np.zeros(len(self.pairs))
+            for pi, (_, _, _, _, sent_id) in enumerate(self.pairs):
+                s_score = 0.0
+                if sent_scores_all is not None:
+                    si = sent_id_to_idx.get(sent_id, -1)
+                    if si >= 0:
+                        s_score = sent_scores_all[si]
+                combined_scores[pi] = pair_alpha * pair_scores[pi] + sent_alpha * s_score
 
-                candidate_size = min(30, len(candidate_pair_idxs))
-                candidate_local_idxs = np.argsort(combined_scores)[::-1][:candidate_size].tolist()
+            pair_norms = np.linalg.norm(self.pair_embeddings, axis=1, keepdims=True)
+            pair_norms = np.where(pair_norms == 0, 1, pair_norms)
+            normed_pairs = self.pair_embeddings / pair_norms
 
-                selected_embs = []
-                for _ in range(link_top_k):
-                    if not candidate_local_idxs:
-                        break
-                    if not selected_embs:
-                        best_local = candidate_local_idxs[0]
-                    else:
-                        selected_matrix = np.array(selected_embs)
-                        best_mmr = -float("inf")
-                        best_local = candidate_local_idxs[0]
-                        for local_idx in candidate_local_idxs:
-                            relevance = combined_scores[local_idx]
-                            sim = np.max(normed_pairs[local_idx] @ selected_matrix.T)
-                            mmr_score = mmr_lambda * relevance - (1 - mmr_lambda) * sim
-                            if mmr_score > best_mmr:
-                                best_mmr = mmr_score
-                                best_local = local_idx
-                    best_pair_idx = candidate_pair_idxs[best_local]
-                    top_pair_idxs.append(best_pair_idx)
-                    selected_embs.append(normed_pairs[best_local])
-                    candidate_local_idxs.remove(best_local)
-                combined_scores_lookup = {
-                    candidate_pair_idxs[local_idx]: combined_scores[local_idx]
-                    for local_idx in np.argsort(combined_scores)[::-1][:candidate_size].tolist()
-                }
+            candidate_size = min(30, len(self.pairs))
+            candidate_idxs = np.argsort(combined_scores)[::-1][:candidate_size].tolist()
+
+            selected_embs = []
+            for _ in range(link_top_k):
+                if not candidate_idxs:
+                    break
+                if not selected_embs:
+                    best_pi = candidate_idxs[0]
+                else:
+                    selected_matrix = np.array(selected_embs)
+                    best_mmr = -float("inf")
+                    best_pi = candidate_idxs[0]
+                    for pi in candidate_idxs:
+                        relevance = combined_scores[pi]
+                        sim = np.max(normed_pairs[pi] @ selected_matrix.T)
+                        mmr_score = mmr_lambda * relevance - (1 - mmr_lambda) * sim
+                        if mmr_score > best_mmr:
+                            best_mmr = mmr_score
+                            best_pi = pi
+                top_pair_idxs.append(best_pi)
+                selected_embs.append(normed_pairs[best_pi])
+                candidate_idxs.remove(best_pi)
+            combined_scores_lookup = {pi: combined_scores[pi] for pi in top_pair_idxs}
 
             ent_occur_count = np.zeros(self.graph.vcount())
             ent_max_score = np.zeros(self.graph.vcount())
@@ -614,6 +539,16 @@ class NERIndex:
             for i, p_idx in enumerate(self.passage_node_idxs):
                 node_weights[p_idx] = passage_scores[i]
 
+        # Round 0 query entity seeds: resolve top-2 query entities directly in graph
+        if query_entities and self.entity_embeddings is not None and len(self.entity_embeddings) > 0:
+            resolved = _resolve_entities_in_graph(self, query_entities)
+            for name, (vid, sim) in resolved.items():
+                ent_key = self.entity_keys[vid] if vid < len(self.entity_keys) else None
+                n_passages = max(len(self.entity_to_passages.get(ent_key, [])), 1) if ent_key else 1
+                w = DEFAULT_ENTITY_SEED_WEIGHT * sim / n_passages
+                node_weights[vid] = max(node_weights[vid], w)
+            logger.info(f"  Query entity seeds: {list(resolved.keys())} → {len(resolved)} nodes")
+
         return node_weights
 
     def retrieve(self, query: str, top_k: int = 5, passage_weight_scale: float = 0.05,
@@ -623,7 +558,8 @@ class NERIndex:
                  mmr_lambda: float = 0.7,
                  working_graph=None,
                  extra_node_weights: Optional[np.ndarray] = None,
-                 return_node_weights: bool = False) -> Tuple[np.ndarray, np.ndarray]:
+                 return_node_weights: bool = False,
+                 query_entities: Optional[List[str]] = None) -> Tuple[np.ndarray, np.ndarray]:
         """Retrieve passages using pair matching + sentence matching → PPR."""
         base_node_weights = self._compute_node_weights(
             query=query,
@@ -633,6 +569,7 @@ class NERIndex:
             sent_alpha=sent_alpha,
             entity_top_k=entity_top_k,
             mmr_lambda=mmr_lambda,
+            query_entities=query_entities,
         )
         node_weights = base_node_weights.copy()
         if extra_node_weights is not None:
@@ -740,7 +677,7 @@ DEFAULT_ENTITY_SEED_WEIGHT = 0.5
 RRF_ROUND_BOOST = 0.5
 EXPANSION_DAMPING = 0.7
 MINI_PPR_THRESHOLD = 0.0001
-PIPELINE_RRF_WEIGHT = 0.5
+PIPELINE_RRF_WEIGHT = 1.0
 EXPANSION_RRF_WEIGHT = 1.0
 
 # Prompt (from feature/graph-reshape query_rewriter.py — includes discovered_entities)
@@ -824,8 +761,9 @@ Retrieved documents so far:
 
 # ── Entity resolution (from feature/graph-reshape controller.py) ──
 
-def _resolve_entities_in_graph(index, entity_names: List[str], threshold: float = 0.6) -> Dict[str, int]:
-    """Resolve entity names to graph vertex IDs. Exact match first, then embedding fallback."""
+def _resolve_entities_in_graph(index, entity_names: List[str], threshold: float = 0.6) -> Dict[str, Tuple[int, float]]:
+    """Resolve entity names to graph vertex IDs with similarity scores.
+    Returns {name: (vid, sim_score)}. Exact match gets sim=1.0."""
     resolved = {}
     unresolved = []
 
@@ -833,7 +771,7 @@ def _resolve_entities_in_graph(index, entity_names: List[str], threshold: float 
         ent_key = compute_hash(name.lower(), prefix="entity-")
         vid = index.node_name_to_idx.get(ent_key)
         if vid is not None:
-            resolved[name] = vid
+            resolved[name] = (vid, 1.0)
             logger.info(f"  Entity '{name}' found (exact) -> vertex {vid}")
         else:
             unresolved.append(name)
@@ -856,22 +794,23 @@ def _resolve_entities_in_graph(index, entity_names: List[str], threshold: float 
 
         for i, name in enumerate(unresolved):
             best_idx = np.argmax(similarities[i])
-            if similarities[i][best_idx] >= threshold:
+            sim = float(similarities[i][best_idx])
+            if sim >= threshold:
                 ent_key = index.entity_keys[best_idx]
                 vid = index.node_name_to_idx.get(ent_key)
                 if vid is not None:
-                    resolved[name] = vid
-                    logger.info(f"  Entity '{name}' matched by embedding (sim={similarities[i][best_idx]:.3f}) -> vertex {vid}")
+                    resolved[name] = (vid, sim)
+                    logger.info(f"  Entity '{name}' matched by embedding (sim={sim:.3f}) -> vertex {vid}")
             else:
-                logger.info(f"  Entity '{name}' NOT found in graph (best sim={similarities[i][best_idx]:.3f})")
+                logger.info(f"  Entity '{name}' NOT found in graph (best sim={sim:.3f})")
 
     return resolved
 
 
-def _degree_adaptive_weight(index, vid: int, base_weight: float) -> float:
-    """Scale weight by log(degree) to resist dilution at high-degree nodes."""
+def _degree_adaptive_weight(index, vid: int, base_weight: float, sim: float = 1.0) -> float:
+    """Scale weight by semantic similarity and log(degree) to resist dilution at high-degree nodes."""
     deg = index.graph.degree(vid)
-    return base_weight * (1.0 + math.log(deg + 1))
+    return base_weight * sim * (1.0 + math.log(deg + 1))
 
 
 def _get_existing_seed_ids(index, base_node_weights: np.ndarray) -> List[int]:
@@ -1083,14 +1022,15 @@ Important: include ALL document numbers exactly once."""
 
 
 def iterative_retrieve(index, question: str, llm_client, max_rounds: int = 3,
-                       gold_docs: List[str] = None):
+                       gold_docs: List[str] = None, query_entities: Optional[List[str]] = None,
+                       entity_top_k: int = 5):
     """Multi-round retrieval with one retrieval pass per round.
 
-    Core semantics:
-      1. Round0 runs base retrieval on the full graph.
-      2. Later rounds run one merged PPR on the shaped graph.
-      3. Selected seeds and overlay edges accumulate per sample across rounds.
-      4. Mini-PPR updates next-round state; it does not trigger a second retrieve in the same round.
+    Core semantics (old version minus hop-5 and cross-round accumulation):
+      1. Each round: single PPR on full graph + this-round temp edges
+      2. Temp edges and seed weights are freshly computed each round from all_discovered
+      3. No hop-5 subgraph, no cross-round seed/edge accumulation
+      4. RRF accumulates doc scores across rounds
     """
     num_docs = len(index.passage_keys)
     rrf_k = 60
@@ -1101,51 +1041,71 @@ def iterative_retrieve(index, question: str, llm_client, max_rounds: int = 3,
     all_discovered = {}
     base_node_weights = None
     round0_top_doc_ids = None
-    hop5_graph = None
-    hop5_vids = None
-    selected_seed_weights = np.zeros(index.graph.vcount())
-    overlay_edge_weights = {}
 
     for round_i in range(max_rounds):
         logger.info(f"  Round {round_i}: query='{current_query[:60]}...'")
 
-        base_graph_for_round = index.graph if round_i == 0 else (hop5_graph if hop5_graph is not None else index.graph)
-        working_graph = (
-            _build_overlay_graph(
-                index,
-                [(u, v, w) for (_, (u, v, w)) in overlay_edge_weights.items()],
-                base_graph=base_graph_for_round,
-            )
-            if overlay_edge_weights else base_graph_for_round
-        )
+        # Round 1+: enrich query embedding with key entities from current query
+        if round_i > 0:
+            round_entities = query_ner(current_query, llm_client)
+            if round_entities:
+                retrieve_query = " | ".join(round_entities) + " | " + current_query
+                logger.info(f"  Enriched query: '{retrieve_query[:80]}...'")
+            else:
+                retrieve_query = current_query
+        else:
+            retrieve_query = current_query
 
-        extra_node_weights = selected_seed_weights.copy()
-        if hop5_vids is not None:
-            mask = np.zeros_like(extra_node_weights)
-            mask[hop5_vids] = 1.0
-            extra_node_weights = extra_node_weights * mask
-        if not np.count_nonzero(extra_node_weights):
-            extra_node_weights = None
+        # Build this-round temp edges from all_discovered (freshly computed, not accumulated)
+        temp_edges = []
+        extra_node_weights = None
+        if all_discovered and base_node_weights is not None:
+            # all_discovered: {name: (vid, sim)}
+            discovered_vid_only = {name: vid for name, (vid, sim) in all_discovered.items()}
+            existing_seeds = _get_existing_seed_ids(index, base_node_weights)
+            ppr_connections = _mini_ppr_select_seeds(
+                index,
+                discovered_vertex_ids=discovered_vid_only,
+                existing_seed_vertex_ids=existing_seeds,
+                round0_top_doc_ids=round0_top_doc_ids,
+            )
+
+            # Build vid -> sim lookup
+            vid_to_sim = {vid: sim for name, (vid, sim) in all_discovered.items()}
+
+            for d_vid, s_vid, _ in ppr_connections:
+                d_sim = vid_to_sim.get(d_vid, 1.0)
+                bridge_weight = _degree_adaptive_weight(index, d_vid, 1.0, sim=d_sim)
+                temp_edges.append((d_vid, s_vid, bridge_weight))
+            d_list = [(vid, sim) for name, (vid, sim) in all_discovered.items()]
+            for i, (v1, s1) in enumerate(d_list):
+                for v2, s2 in d_list[i + 1:]:
+                    w = max(_degree_adaptive_weight(index, v1, 1.0, sim=s1),
+                            _degree_adaptive_weight(index, v2, 1.0, sim=s2))
+                    temp_edges.append((v1, v2, w))
+
+            # Fresh seed weights for this round
+            extra_node_weights = np.zeros(index.graph.vcount())
+            for name, (vid, sim) in all_discovered.items():
+                extra_node_weights[vid] += _degree_adaptive_weight(index, vid, DEFAULT_ENTITY_SEED_WEIGHT, sim=sim)
+
+            logger.info(f"  Overlay: {len(all_discovered)} bridge entities, {len(temp_edges)} temp edges")
+
+        # Single PPR on full graph + temp edges
+        working_graph = _build_overlay_graph(index, temp_edges) if temp_edges else index.graph
 
         sorted_doc_ids, sorted_doc_scores, current_node_weights = index.retrieve(
-            current_query,
+            retrieve_query,
             working_graph=working_graph,
             extra_node_weights=extra_node_weights,
             return_node_weights=True,
+            query_entities=None,
         )
-        base_node_weights = current_node_weights
         base_top_docs = [index.passages[index.passage_keys[idx]] for idx in sorted_doc_ids[:10]]
 
         if round_i == 0:
+            base_node_weights = current_node_weights
             round0_top_doc_ids = [int(d) for d in sorted_doc_ids[:20]]
-            if base_node_weights is not None:
-                existing_seeds = _get_existing_seed_ids(index, base_node_weights)
-                core_vids = set(existing_seeds)
-                for doc_id in round0_top_doc_ids:
-                    core_vids.add(index.passage_node_idxs[doc_id])
-                hop5_vids = _collect_hop_subgraph_vids(index, list(core_vids), hops=5)
-                hop5_graph = _build_masked_graph(index, hop5_vids)
-                logger.info(f"  Built hop-5 subgraph: {len(hop5_vids)} nodes, {hop5_graph.ecount()} edges")
 
         round_weight = 1.0 + round_i * RRF_ROUND_BOOST
         for rank, doc_id in enumerate(sorted_doc_ids):
@@ -1159,12 +1119,7 @@ def iterative_retrieve(index, question: str, llm_client, max_rounds: int = 3,
             "query": current_query,
             "base_top_doc_ids": [int(idx) for idx in sorted_doc_ids[:10]],
             "rrf_top_doc_ids": [int(idx) for idx in final_sorted_ids[:10]],
-            "bridge_edges": 0,
-            "temp_edges": 0,
-            "mini_ppr_seed_names": [],
-            "selected_seed_names": [],
-            "selected_seed_total": int(np.count_nonzero(selected_seed_weights)),
-            "overlay_edge_total": len(overlay_edge_weights),
+            "bridge_edges": len(temp_edges),
             "discovered_entities_total": sorted(all_discovered.keys()),
         }
         if gold_docs is not None:
@@ -1218,68 +1173,10 @@ def iterative_retrieve(index, question: str, llm_client, max_rounds: int = 3,
 
         discovered_entities = reasoning_output.get("discovered_entities", [])
         if discovered_entities:
-            logger.info(f"  Discovered entities: {discovered_entities}")
             resolved = _resolve_entities_in_graph(index, discovered_entities)
             all_discovered.update(resolved)
-            logger.info(f"  Total resolved entities: {len(all_discovered)}")
+            logger.info(f"  Resolved {len(resolved)}/{len(discovered_entities)} bridge entities in graph")
             round_diag["discovered_entities_total"] = sorted(all_discovered.keys())
-
-            effective_seed_weights = base_node_weights.copy() if base_node_weights is not None else np.zeros(index.graph.vcount())
-            if np.count_nonzero(selected_seed_weights):
-                effective_seed_weights = effective_seed_weights + selected_seed_weights
-            if hop5_vids is not None:
-                mask = np.zeros_like(effective_seed_weights)
-                mask[hop5_vids] = 1.0
-                effective_seed_weights = effective_seed_weights * mask
-
-            existing_seeds = _get_existing_seed_ids(index, effective_seed_weights)
-            ppr_connections = _mini_ppr_select_seeds(
-                index,
-                discovered_vertex_ids=all_discovered,
-                existing_seed_vertex_ids=existing_seeds,
-                round0_top_doc_ids=round0_top_doc_ids,
-                graph=working_graph,
-            )
-
-            selected_seed_vids = sorted({s_vid for _, s_vid, _ in ppr_connections})
-            selected_seed_names = sorted(index.graph.vs[s_vid]["content"] for s_vid in selected_seed_vids)[:10]
-            for s_vid in selected_seed_vids:
-                selected_seed_weights[s_vid] += _degree_adaptive_weight(index, s_vid, DEFAULT_ENTITY_SEED_WEIGHT)
-
-            new_bridge_edges = 0
-            for d_vid, s_vid, _ in ppr_connections:
-                bridge_weight = _degree_adaptive_weight(index, d_vid, 1.0)
-                edge = (min(d_vid, s_vid), max(d_vid, s_vid), bridge_weight)
-                key = (edge[0], edge[1])
-                prev = overlay_edge_weights.get(key)
-                if prev is None or bridge_weight > prev[2]:
-                    overlay_edge_weights[key] = edge
-                new_bridge_edges += 1
-
-            d_list = list(all_discovered.values())
-            for i, v1 in enumerate(d_list):
-                for v2 in d_list[i + 1:]:
-                    w = max(
-                        _degree_adaptive_weight(index, v1, 1.0),
-                        _degree_adaptive_weight(index, v2, 1.0),
-                    )
-                    edge = (min(v1, v2), max(v1, v2), w)
-                    key = (edge[0], edge[1])
-                    prev = overlay_edge_weights.get(key)
-                    if prev is None or w > prev[2]:
-                        overlay_edge_weights[key] = edge
-
-            round_diag["bridge_edges"] = len(selected_seed_vids)
-            round_diag["temp_edges"] = new_bridge_edges
-            round_diag["mini_ppr_seed_names"] = selected_seed_names
-            round_diag["selected_seed_names"] = selected_seed_names
-            round_diag["selected_seed_total"] = int(np.count_nonzero(selected_seed_weights))
-            round_diag["overlay_edge_total"] = len(overlay_edge_weights)
-            logger.info(
-                f"  Overlay update: discovered={len(all_discovered)}, "
-                f"selected_seeds={len(selected_seed_vids)}, new_bridge_edges={new_bridge_edges}, "
-                f"overlay_edges_total={len(overlay_edge_weights)}"
-            )
 
         round_diagnostics.append(round_diag)
 
@@ -1579,14 +1476,29 @@ def run_evaluation(args):
             else:
                 index = global_index
 
+            q_entities = query_ner(question, llm_client)
+            logger.info(f"  Query entity pairs: {q_entities}")
+
+            # Baseline: single-round retrieval without query entity linking
+            base_sorted_ids, _ = index.retrieve(question)
+            base_docs = [index.passages[index.passage_keys[did]] for did in base_sorted_ids]
+            base_answer = llm_qa(question, base_docs[:5], llm_client)
+            base_em = int(check_em(base_answer, answer, answer_aliases))
+            base_f1 = round(check_f1(base_answer, answer, answer_aliases), 4)
+            base_r1 = recall_at_k(base_docs, gold_docs, 1)
+            base_r2 = recall_at_k(base_docs, gold_docs, 2)
+            base_r5 = recall_at_k(base_docs, gold_docs, 5)
+            base_r10 = recall_at_k(base_docs, gold_docs, 10)
+
             if mode == 'ircot':
                 retrieved_docs, reasoning_traces = ircot_retrieve(
                     index, question, llm_client, max_rounds=args.max_rounds)
             elif args.max_rounds > 1:
                 retrieved_docs, reasoning_traces, round_diagnostics = iterative_retrieve(
-                    index, question, llm_client, max_rounds=args.max_rounds, gold_docs=gold_docs)
+                    index, question, llm_client, max_rounds=args.max_rounds, gold_docs=gold_docs,
+                    query_entities=q_entities)
             else:
-                sorted_doc_ids, sorted_doc_scores = index.retrieve(question)
+                sorted_doc_ids, sorted_doc_scores = index.retrieve(question, query_entities=q_entities)
                 retrieved_docs = [index.passages[index.passage_keys[did]] for did in sorted_doc_ids]
 
             r1 = recall_at_k(retrieved_docs, gold_docs, 1)
@@ -1609,12 +1521,20 @@ def run_evaluation(args):
             qa_answer = "Error"
             em_correct = False
             f1_score = 0.0
+            base_answer = "Error"
+            base_em = 0
+            base_f1 = 0.0
+            base_r1 = base_r2 = base_r5 = base_r10 = 0.0
 
         result = {
             "idx": idx,
             "question": question,
             "gold_answer": answer,
             "gold_aliases": answer_aliases,
+            "baseline_answer": base_answer,
+            "baseline_em": base_em,
+            "baseline_f1": base_f1,
+            "baseline_recall": {"R@1": base_r1, "R@2": base_r2, "R@5": base_r5, "R@10": base_r10},
             "ner_answer": qa_answer,
             "ner_em": int(em_correct),
             "ner_f1": round(f1_score, 4),
@@ -1629,7 +1549,7 @@ def run_evaluation(args):
         all_results.append(result)
 
         em_str = "Y" if em_correct else "N"
-        logger.info(f"  EM={em_str} F1={f1_score:.2f} R@5={r5:.2f} | '{qa_answer[:50]}' | Gold='{answer}'")
+        logger.info(f"  Base EM={'Y' if base_em else 'N'} R@5={base_r5:.2f} | NER EM={em_str} F1={f1_score:.2f} R@5={r5:.2f} | Gold='{answer}'")
 
         if global_index is None and index is not None:
             del index
@@ -1637,13 +1557,16 @@ def run_evaluation(args):
 
         if (idx + 1) % 5 == 0 or (idx + 1) == len(data):
             n = len(all_results)
+            avg_base_em = sum(r["baseline_em"] for r in all_results) / n
+            avg_base_f1 = sum(r["baseline_f1"] for r in all_results) / n
+            avg_base_r5 = sum(r["baseline_recall"]["R@5"] for r in all_results) / n
             avg_em = sum(r["ner_em"] for r in all_results) / n
             avg_f1 = sum(r["ner_f1"] for r in all_results) / n
             avg_r1 = sum(r["ner_recall"]["R@1"] for r in all_results) / n
             avg_r2 = sum(r["ner_recall"]["R@2"] for r in all_results) / n
             avg_r5 = sum(r["ner_recall"]["R@5"] for r in all_results) / n
             avg_r10 = sum(r["ner_recall"]["R@10"] for r in all_results) / n
-            logger.info(f"  >>> Progress: {n}/{len(data)} | EM={avg_em:.3f} | F1={avg_f1:.3f} | R@5={avg_r5:.3f}")
+            logger.info(f"  >>> Progress: {n}/{len(data)} | Base EM={avg_base_em:.3f} R@5={avg_base_r5:.3f} | NER EM={avg_em:.3f} F1={avg_f1:.3f} R@5={avg_r5:.3f}")
 
             with open(output_path, "w") as f:
                 json.dump({
@@ -1656,6 +1579,9 @@ def run_evaluation(args):
                     },
                     "summary": {
                         "n_completed": n,
+                        "baseline_em": round(avg_base_em, 4),
+                        "baseline_f1": round(avg_base_f1, 4),
+                        "baseline_recall": {"R@5": round(avg_base_r5, 4)},
                         "ner_em": round(avg_em, 4),
                         "ner_f1": round(avg_f1, 4),
                         "ner_recall": {
@@ -1680,6 +1606,9 @@ def run_evaluation(args):
             logger.info(f"Saved NER cache: {ner_cache_path} ({len(ner_cache)} entries)")
 
     n = len(all_results)
+    avg_base_em = sum(r["baseline_em"] for r in all_results) / n
+    avg_base_f1 = sum(r["baseline_f1"] for r in all_results) / n
+    avg_base_r5 = sum(r["baseline_recall"]["R@5"] for r in all_results) / n
     avg_em = sum(r["ner_em"] for r in all_results) / n
     avg_f1 = sum(r["ner_f1"] for r in all_results) / n
     avg_r1 = sum(r["ner_recall"]["R@1"] for r in all_results) / n
@@ -1688,10 +1617,10 @@ def run_evaluation(args):
     total_time = time.time() - total_start
     print(f"\n{'='*60}")
     print(f"NER Pipeline Results: {n} samples")
-    print(f"  EM:   {avg_em:.4f}")
-    print(f"  F1:   {avg_f1:.4f}")
-    print(f"  R@1:  {avg_r1:.4f}")
-    print(f"  R@5:  {avg_r5:.4f}")
+    print(f"  Baseline EM:  {avg_base_em:.4f}  F1: {avg_base_f1:.4f}  R@5: {avg_base_r5:.4f}")
+    print(f"  NER EM:       {avg_em:.4f}  F1: {avg_f1:.4f}")
+    print(f"  NER R@1:      {avg_r1:.4f}")
+    print(f"  NER R@5:      {avg_r5:.4f}")
     print(f"  Time: {total_time/60:.1f} min")
     print(f"  Results: {output_path}")
     print(f"{'='*60}")
