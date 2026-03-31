@@ -622,15 +622,17 @@ class ReasoningController:
         ]
         final_scores = [rrf_scores[idx] for idx in final_sorted_ids[:num_to_retrieve]]
 
-        # LLM reranker: reorder docs based on reasoning trajectory
-        if state.reasoning_traces:
+        # LLM reranker: reorder top-5 docs based on reasoning trajectory
+        # Rerank limit must match QA doc count to avoid unfair advantage
+        rerank_limit = min(5, len(final_docs))
+        if state.reasoning_traces and rerank_limit > 1:
             reranked_docs = self._llm_reasoning_rerank(
                 query=state.original_query,
-                docs=final_docs,
+                docs=final_docs[:rerank_limit],
                 reasoning_traces=state.reasoning_traces,
             )
             if reranked_docs is not None:
-                final_docs = reranked_docs
+                final_docs = reranked_docs + final_docs[rerank_limit:]
 
         return QuerySolution(
             question=state.original_query,
