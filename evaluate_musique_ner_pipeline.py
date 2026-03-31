@@ -1183,7 +1183,7 @@ def iterative_retrieve(index, question: str, llm_client, max_rounds: int = 3,
     final_sorted_ids = np.argsort(rrf_scores)[::-1]
     retrieved_docs = [index.passages[index.passage_keys[idx]] for idx in final_sorted_ids]
 
-    rerank_limit = min(10, len(retrieved_docs))
+    rerank_limit = min(5, len(retrieved_docs))
     if rerank_limit > 1:
         reranked = _llm_reasoning_rerank(question, retrieved_docs[:rerank_limit], reasoning_traces, llm_client)
         if reranked is not None:

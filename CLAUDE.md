@@ -30,6 +30,7 @@
   - NER pipeline：`--ner_cache outputs/musique_ner_pipeline_eval/ner_cache.json`
   - 不同 cache 会产生不同知识图谱，导致 baseline R@5 差异高达 0.03。
 - **严禁在实验运行中途修改代码后立刻启动新实验**：必须先确认旧实验已结束或已手动 kill，再改代码，再启动新实验。同时运行多个实验且代码版本不同，会导致结果混乱、无法溯源。
+- **Rerank的doc数量必须等于QA使用的doc数量**（目前都是top-5）。如果rerank top-K > QA top-K，reranker可以在更大范围内挑选最好的放到前面，相当于作弊。
 
 ## Server Jobs
 - 提交新 job 前，主动删除之前失败 job 产生的无效样本结果文件，避免 resume 时加载坏数据
