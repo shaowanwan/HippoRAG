@@ -1026,12 +1026,13 @@ def iterative_retrieve(index, question: str, llm_client, max_rounds: int = 3,
                        entity_top_k: int = 5):
     """Multi-round retrieval with one retrieval pass per round.
 
-    Core semantics (old version minus hop-5 and cross-round accumulation):
-      1. Each round: single PPR on full graph + this-round temp edges
-      2. Temp edges and seed weights are freshly computed each round from all_discovered
-      3. No hop-5 subgraph, no cross-round seed/edge accumulation
+    Core semantics:
+      1. Each round: single PPR on full graph + temp edges from all_discovered
+      2. Seed weights decay across rounds (decay=0.5 per round since discovery)
+      3. No hop-5 subgraph
       4. RRF accumulates doc scores across rounds
     """
+    SEED_DECAY = 0.5
     num_docs = len(index.passage_keys)
     rrf_k = 60
     rrf_scores = np.zeros(num_docs)
@@ -1060,8 +1061,8 @@ def iterative_retrieve(index, question: str, llm_client, max_rounds: int = 3,
         temp_edges = []
         extra_node_weights = None
         if all_discovered and base_node_weights is not None:
-            # all_discovered: {name: (vid, sim)}
-            discovered_vid_only = {name: vid for name, (vid, sim) in all_discovered.items()}
+            # all_discovered: {name: (vid, sim, discover_round)}
+            discovered_vid_only = {name: vid for name, (vid, sim, disc_round) in all_discovered.items()}
             existing_seeds = _get_existing_seed_ids(index, base_node_weights)
             ppr_connections = _mini_ppr_select_seeds(
                 index,
@@ -1070,24 +1071,30 @@ def iterative_retrieve(index, question: str, llm_client, max_rounds: int = 3,
                 round0_top_doc_ids=round0_top_doc_ids,
             )
 
-            # Build vid -> sim lookup
-            vid_to_sim = {vid: sim for name, (vid, sim) in all_discovered.items()}
+            # Build vid -> (sim, decay_factor) lookup
+            vid_to_sim = {}
+            for name, (vid, sim, disc_round) in all_discovered.items():
+                decay = SEED_DECAY ** (round_i - disc_round)
+                vid_to_sim[vid] = (sim, decay)
 
             for d_vid, s_vid, _ in ppr_connections:
-                d_sim = vid_to_sim.get(d_vid, 1.0)
-                bridge_weight = _degree_adaptive_weight(index, d_vid, 1.0, sim=d_sim)
+                d_sim, d_decay = vid_to_sim.get(d_vid, (1.0, 1.0))
+                bridge_weight = _degree_adaptive_weight(index, d_vid, 1.0, sim=d_sim) * d_decay
                 temp_edges.append((d_vid, s_vid, bridge_weight))
-            d_list = [(vid, sim) for name, (vid, sim) in all_discovered.items()]
-            for i, (v1, s1) in enumerate(d_list):
-                for v2, s2 in d_list[i + 1:]:
-                    w = max(_degree_adaptive_weight(index, v1, 1.0, sim=s1),
-                            _degree_adaptive_weight(index, v2, 1.0, sim=s2))
+            d_list = [(vid, sim, disc_round) for name, (vid, sim, disc_round) in all_discovered.items()]
+            for i, (v1, s1, dr1) in enumerate(d_list):
+                for v2, s2, dr2 in d_list[i + 1:]:
+                    decay1 = SEED_DECAY ** (round_i - dr1)
+                    decay2 = SEED_DECAY ** (round_i - dr2)
+                    w = max(_degree_adaptive_weight(index, v1, 1.0, sim=s1) * decay1,
+                            _degree_adaptive_weight(index, v2, 1.0, sim=s2) * decay2)
                     temp_edges.append((v1, v2, w))
 
-            # Fresh seed weights for this round
+            # Seed weights with decay
             extra_node_weights = np.zeros(index.graph.vcount())
-            for name, (vid, sim) in all_discovered.items():
-                extra_node_weights[vid] += _degree_adaptive_weight(index, vid, DEFAULT_ENTITY_SEED_WEIGHT, sim=sim)
+            for name, (vid, sim, disc_round) in all_discovered.items():
+                decay = SEED_DECAY ** (round_i - disc_round)
+                extra_node_weights[vid] += _degree_adaptive_weight(index, vid, DEFAULT_ENTITY_SEED_WEIGHT, sim=sim) * decay
 
             logger.info(f"  Overlay: {len(all_discovered)} bridge entities, {len(temp_edges)} temp edges")
 
@@ -1174,7 +1181,9 @@ def iterative_retrieve(index, question: str, llm_client, max_rounds: int = 3,
         discovered_entities = reasoning_output.get("discovered_entities", [])
         if discovered_entities:
             resolved = _resolve_entities_in_graph(index, discovered_entities)
-            all_discovered.update(resolved)
+            for name, (vid, sim) in resolved.items():
+                if name not in all_discovered:
+                    all_discovered[name] = (vid, sim, round_i)
             logger.info(f"  Resolved {len(resolved)}/{len(discovered_entities)} bridge entities in graph")
             round_diag["discovered_entities_total"] = sorted(all_discovered.keys())
 
