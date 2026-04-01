@@ -1166,7 +1166,7 @@ def iterative_retrieve(index, question: str, llm_client, max_rounds: int = 3,
       3. No hop-5 subgraph
       4. RRF accumulates doc scores across rounds
     """
-    SEED_DECAY = 0.5
+    SEED_DECAY = 0.75
     num_docs = len(index.passage_keys)
     rrf_k = 60
     rrf_scores = np.zeros(num_docs)
@@ -1253,20 +1253,12 @@ def iterative_retrieve(index, question: str, llm_client, max_rounds: int = 3,
             base_node_weights = current_node_weights
             round0_top_doc_ids = [int(d) for d in sorted_doc_ids[:20]]
 
-        # Current round PPR scores (RRF-normalized)
-        current_rrf = np.zeros(num_docs)
+        # Old-style cumulative RRF with round weight boost
+        round_weight = 1.0 + round_i * RRF_ROUND_BOOST
         for rank, doc_id in enumerate(sorted_doc_ids):
-            current_rrf[doc_id] = 1.0 / (rrf_k + rank + 1)
+            rrf_scores[doc_id] += PIPELINE_RRF_WEIGHT * round_weight / (rrf_k + rank + 1)
 
-        # Final = history RRF (small weight) + current PPR (large weight)
-        # Normalize history by number of past rounds to keep range comparable
-        HISTORY_WEIGHT = 0.3
-        CURRENT_WEIGHT = 1.0
-        history_norm = rrf_scores / max(round_i, 1)
-        combined_scores = HISTORY_WEIGHT * history_norm + CURRENT_WEIGHT * current_rrf
-
-        # Accumulate current round into history for next round
-        rrf_scores += current_rrf
+        combined_scores = rrf_scores
 
         final_sorted_ids = np.argsort(combined_scores)[::-1]
         top_docs = [index.passages[index.passage_keys[idx]] for idx in final_sorted_ids[:10]]
