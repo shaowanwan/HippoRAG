@@ -306,23 +306,19 @@ class NERIndex:
                     stats["extra_entities"] += 1
 
                     # New co-occurrence pairs with existing entities in this sentence
-                    for existing_text, existing_key in list(existing_ent_keys):
+                    ent_idx = self.node_name_to_idx.get(ent_key)
+                    for existing_text, existing_key in sent_data["entities"]:
                         if existing_key == ent_key:
                             continue
-                        ent_idx = self.node_name_to_idx.get(ent_key)
+                        if existing_key not in existing_ent_keys:
+                            continue
                         existing_idx = self.node_name_to_idx.get(existing_key)
                         if ent_idx is not None and existing_idx is not None:
                             new_edges.append((ent_idx, existing_idx))
                             new_weights.append(1.0)
                             stats["coref_edges"] += 1
-                            # Pair for embedding
-                            existing_text_str = existing_key  # fallback
-                            for et, ek in sent_data["entities"]:
-                                if ek == existing_key:
-                                    existing_text_str = et
-                                    break
-                            new_pairs.append((ent_name.lower(), ent_key, existing_text_str, existing_key, sent_id))
-                            new_pair_texts.append(f"{ent_name.lower()} | {existing_text_str} | {sent_data['text']}")
+                            new_pairs.append((ent_name.lower(), ent_key, existing_text, existing_key, sent_id))
+                            new_pair_texts.append(f"{ent_name.lower()} | {existing_text} | {sent_data['text']}")
 
                     existing_ent_keys.add(ent_key)
 
@@ -1619,11 +1615,18 @@ def run_evaluation(args):
         # Augment with cross-sentence relations if cache available
         cross_cache_path = getattr(args, 'cross_sentence_cache', None)
         if cross_cache_path and os.path.exists(cross_cache_path):
-            logger.info(f"Loading cross-sentence cache: {cross_cache_path}")
-            with open(cross_cache_path) as f:
-                cross_cache = json.load(f)
-            logger.info(f"  {len(cross_cache)} passages with cross-sentence relations")
-            global_index.augment_cross_sentence(cross_cache)
+            augmented_pkl = cross_cache_path.replace('.json', '_augmented_index.pkl')
+            if os.path.exists(augmented_pkl):
+                logger.info(f"Loading augmented index from {augmented_pkl}")
+                global_index = NERIndex.load(augmented_pkl, embedding_model=emb_model)
+            else:
+                logger.info(f"Loading cross-sentence cache: {cross_cache_path}")
+                with open(cross_cache_path) as f:
+                    cross_cache = json.load(f)
+                logger.info(f"  {len(cross_cache)} passages with cross-sentence relations")
+                global_index.augment_cross_sentence(cross_cache)
+                global_index.save(augmented_pkl)
+                logger.info(f"Saved augmented index to {augmented_pkl}")
 
     for idx, sample in enumerate(data):
         question = sample.get("question", "")
