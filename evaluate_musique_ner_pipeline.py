@@ -1166,7 +1166,7 @@ def iterative_retrieve(index, question: str, llm_client, max_rounds: int = 3,
       3. No hop-5 subgraph
       4. RRF accumulates doc scores across rounds
     """
-    SEED_DECAY = 0.5
+    SEED_DECAY = 0.75
     num_docs = len(index.passage_keys)
     rrf_k = 60
     rrf_scores = np.zeros(num_docs)
