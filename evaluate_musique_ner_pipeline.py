@@ -894,7 +894,7 @@ Retrieved documents so far:
 
 # ── Entity resolution (from feature/graph-reshape controller.py) ──
 
-def _resolve_entities_in_graph(index, entity_names: List[str], threshold: float = 0.6) -> Dict[str, Tuple[int, float]]:
+def _resolve_entities_in_graph(index, entity_names: List[str], threshold: float = 0.55) -> Dict[str, Tuple[int, float]]:
     """Resolve entity names to graph vertex IDs with similarity scores.
     Returns {name: (vid, sim_score)}. Exact match gets sim=1.0."""
     resolved = {}
@@ -944,6 +944,50 @@ def _degree_adaptive_weight(index, vid: int, base_weight: float, sim: float = 1.
     """Scale weight by semantic similarity and log(degree) to resist dilution at high-degree nodes."""
     deg = index.graph.degree(vid)
     return base_weight * sim * (1.0 + math.log(deg + 1))
+
+
+def _get_bridge_query_sims(index, discovered: Dict[str, Tuple[int, float, float]],
+                           query: str) -> Dict[int, float]:
+    """For each bridge entity, compute similarity of 'entity | query' against pair embeddings.
+
+    Returns {vid: max_pair_sim}. This measures how relevant the bridge entity is
+    to the query in the context of existing entity relationships.
+    """
+    if index.pair_embeddings is None or len(index.pair_embeddings) == 0:
+        return {vid: 1.0 for name, (vid, sim, dr) in discovered.items()}
+
+    # Compute "bridge_entity | query" embeddings for all discovered entities
+    bridge_texts = []
+    bridge_vids = []
+    for name, (vid, sim, disc_round) in discovered.items():
+        bridge_texts.append(f"{name} | {query}")
+        bridge_vids.append(vid)
+
+    if not bridge_texts:
+        return {}
+
+    bridge_embs = index.embedding_model.batch_encode(bridge_texts)
+    if bridge_embs.ndim == 1:
+        bridge_embs = bridge_embs.reshape(1, -1)
+
+    # Normalize
+    b_norms = np.linalg.norm(bridge_embs, axis=1, keepdims=True)
+    b_norms = np.where(b_norms == 0, 1, b_norms)
+    bridge_embs = bridge_embs / b_norms
+
+    p_norms = np.linalg.norm(index.pair_embeddings, axis=1, keepdims=True)
+    p_norms = np.where(p_norms == 0, 1, p_norms)
+    normed_pairs = index.pair_embeddings / p_norms
+
+    # Compute similarities: (n_bridge, n_pairs) -> max per bridge
+    sims = bridge_embs @ normed_pairs.T
+    max_sims = sims.max(axis=1)
+
+    result = {}
+    for i, vid in enumerate(bridge_vids):
+        result[vid] = float(max(max_sims[i], 0.0))
+
+    return result
 
 
 def _get_existing_seed_ids(index, base_node_weights: np.ndarray) -> List[int]:
@@ -1195,13 +1239,16 @@ def iterative_retrieve(index, question: str, llm_client, max_rounds: int = 3,
         temp_edges = []
         extra_node_weights = None
         if all_discovered and base_node_weights is not None:
-            # all_discovered: {name: (vid, sim, discover_round)}
-            # Build vid -> (sim, decay_factor) lookup
-            vid_to_sim = {}
+            # Compute query-pair sim for all bridge entities (sentence-level relevance)
+            query_sims = _get_bridge_query_sims(index, all_discovered, retrieve_query)
+
+            # Build vid -> (query_sim, decay_factor) lookup
+            vid_to_info = {}
             discovered_with_decay = {}
-            for name, (vid, sim, disc_round) in all_discovered.items():
+            for name, (vid, res_sim, disc_round) in all_discovered.items():
                 decay = SEED_DECAY ** (round_i - disc_round)
-                vid_to_sim[vid] = (sim, decay)
+                q_sim = query_sims.get(vid, 1.0)
+                vid_to_info[vid] = (q_sim, decay)
                 discovered_with_decay[name] = (vid, decay)
 
             existing_seeds = _get_existing_seed_ids(index, base_node_weights)
@@ -1213,14 +1260,15 @@ def iterative_retrieve(index, question: str, llm_client, max_rounds: int = 3,
             )
 
             for d_vid, s_vid, _ in ppr_connections:
-                d_sim, d_decay = vid_to_sim.get(d_vid, (1.0, 1.0))
-                bridge_weight = _degree_adaptive_weight(index, d_vid, 1.0, sim=d_sim) * d_decay
+                d_qsim, d_decay = vid_to_info.get(d_vid, (1.0, 1.0))
+                bridge_weight = _degree_adaptive_weight(index, d_vid, 1.0, sim=d_qsim) * d_decay
                 temp_edges.append((d_vid, s_vid, bridge_weight))
 
             # Inter-discovered edges: only connect entities from the same round
             by_round = {}
-            for name, (vid, sim, disc_round) in all_discovered.items():
-                by_round.setdefault(disc_round, []).append((vid, sim, disc_round))
+            for name, (vid, res_sim, disc_round) in all_discovered.items():
+                q_sim = query_sims.get(vid, 1.0)
+                by_round.setdefault(disc_round, []).append((vid, q_sim, disc_round))
             for dr, entities in by_round.items():
                 decay = SEED_DECAY ** (round_i - dr)
                 for i, (v1, s1, _) in enumerate(entities):
@@ -1229,11 +1277,12 @@ def iterative_retrieve(index, question: str, llm_client, max_rounds: int = 3,
                                 _degree_adaptive_weight(index, v2, 1.0, sim=s2)) * decay
                         temp_edges.append((v1, v2, w))
 
-            # Seed weights with decay
+            # Seed weights with decay (using query-pair sim)
             extra_node_weights = np.zeros(index.graph.vcount())
-            for name, (vid, sim, disc_round) in all_discovered.items():
+            for name, (vid, res_sim, disc_round) in all_discovered.items():
                 decay = SEED_DECAY ** (round_i - disc_round)
-                extra_node_weights[vid] += _degree_adaptive_weight(index, vid, DEFAULT_ENTITY_SEED_WEIGHT, sim=sim) * decay
+                q_sim = query_sims.get(vid, 1.0)
+                extra_node_weights[vid] += _degree_adaptive_weight(index, vid, DEFAULT_ENTITY_SEED_WEIGHT, sim=q_sim) * decay
 
             logger.info(f"  Overlay: {len(all_discovered)} bridge entities, {len(temp_edges)} temp edges")
 
