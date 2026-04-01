@@ -255,6 +255,139 @@ class NERIndex:
         logger.info(f"Loaded NERIndex from {path}: {index.graph.vcount()} nodes, {index.graph.ecount()} edges")
         return index
 
+    def augment_cross_sentence(self, cross_cache: Dict[str, dict]):
+        """Augment graph with cross-sentence relations and coreference.
+
+        cross_cache: {passage_text: {
+            "extra_entities_by_sentence": {"0": ["entity1"], ...},
+            "cross_sentence_pairs": [["e1", "e2", "description"], ...]
+        }}
+        """
+        # Build passage_text → (passage_id, [sent_ids_in_order]) mapping
+        passage_to_sents = defaultdict(list)
+        for sent_id in self.sentence_ids:
+            passage_id = self.sentences[sent_id]["passage_id"]
+            passage_to_sents[passage_id].append(sent_id)
+
+        text_to_passage_id = {text: pid for pid, text in self.passages.items()}
+
+        new_edges = []
+        new_weights = []
+        new_pairs = []
+        new_pair_texts = []
+        stats = {"extra_entities": 0, "coref_edges": 0, "cross_pairs": 0, "cross_edges": 0}
+
+        for passage_text, relations in cross_cache.items():
+            passage_id = text_to_passage_id.get(passage_text)
+            if not passage_id:
+                continue
+            sent_ids = passage_to_sents.get(passage_id, [])
+
+            # 1) Coreference: add extra entities to sentences → new co-occurrence edges
+            for sent_idx_str, extra_ents in relations.get("extra_entities_by_sentence", {}).items():
+                sent_idx = int(sent_idx_str)
+                if sent_idx >= len(sent_ids):
+                    continue
+                sent_id = sent_ids[sent_idx]
+                sent_data = self.sentences[sent_id]
+                existing_ent_keys = {ek for _, ek in sent_data["entities"]}
+
+                for ent_name in extra_ents:
+                    ent_key = compute_hash(ent_name.lower(), prefix="entity-")
+                    if ent_key not in self.node_name_to_idx:
+                        continue  # entity not in graph
+                    if ent_key in existing_ent_keys:
+                        continue  # already in this sentence
+
+                    # Add entity to sentence
+                    sent_data["entities"].append((ent_name.lower(), ent_key))
+                    self.entity_to_sentences[ent_key].append(sent_id)
+                    self.entity_to_passages[ent_key].add(passage_id)
+                    stats["extra_entities"] += 1
+
+                    # New co-occurrence pairs with existing entities in this sentence
+                    for existing_text, existing_key in list(existing_ent_keys):
+                        if existing_key == ent_key:
+                            continue
+                        ent_idx = self.node_name_to_idx.get(ent_key)
+                        existing_idx = self.node_name_to_idx.get(existing_key)
+                        if ent_idx is not None and existing_idx is not None:
+                            new_edges.append((ent_idx, existing_idx))
+                            new_weights.append(1.0)
+                            stats["coref_edges"] += 1
+                            # Pair for embedding
+                            existing_text_str = existing_key  # fallback
+                            for et, ek in sent_data["entities"]:
+                                if ek == existing_key:
+                                    existing_text_str = et
+                                    break
+                            new_pairs.append((ent_name.lower(), ent_key, existing_text_str, existing_key, sent_id))
+                            new_pair_texts.append(f"{ent_name.lower()} | {existing_text_str} | {sent_data['text']}")
+
+                    existing_ent_keys.add(ent_key)
+
+            # 2) Cross-sentence pairs: add edges with synthetic sentence
+            for pair in relations.get("cross_sentence_pairs", []):
+                if len(pair) < 3:
+                    continue
+                e1, e2, desc = pair[0], pair[1], pair[2]
+                k1 = compute_hash(e1.lower(), prefix="entity-")
+                k2 = compute_hash(e2.lower(), prefix="entity-")
+                idx1 = self.node_name_to_idx.get(k1)
+                idx2 = self.node_name_to_idx.get(k2)
+                if idx1 is None or idx2 is None:
+                    continue
+
+                # Add graph edge
+                new_edges.append((idx1, idx2))
+                new_weights.append(1.0)
+                stats["cross_pairs"] += 1
+                stats["cross_edges"] += 1
+
+                # Create synthetic sentence for pair embedding
+                synthetic_sent_id = f"cross-{passage_id}-{k1[:8]}-{k2[:8]}"
+                self.sentences[synthetic_sent_id] = {
+                    "text": desc,
+                    "passage_id": passage_id,
+                    "entities": [(e1.lower(), k1), (e2.lower(), k2)],
+                }
+                new_pairs.append((e1.lower(), k1, e2.lower(), k2, synthetic_sent_id))
+                new_pair_texts.append(f"{e1.lower()} | {e2.lower()} | {desc}")
+
+                # Ensure entities are linked to passage
+                self.entity_to_passages[k1].add(passage_id)
+                self.entity_to_passages[k2].add(passage_id)
+
+                # Add entity-passage edges if not already connected
+                p_idx = self.node_name_to_idx.get(passage_id)
+                if p_idx is not None:
+                    if not self.graph.are_connected(idx1, p_idx):
+                        new_edges.append((idx1, p_idx))
+                        new_weights.append(1.0)
+                    if not self.graph.are_connected(idx2, p_idx):
+                        new_edges.append((idx2, p_idx))
+                        new_weights.append(1.0)
+
+        # Add edges to graph
+        if new_edges:
+            self.graph.add_edges(new_edges, attributes={"weight": new_weights})
+
+        # Compute pair embeddings for new pairs and append
+        if new_pair_texts:
+            new_embs = self.embedding_model.batch_encode(new_pair_texts)
+            if self.pair_embeddings is not None and len(self.pair_embeddings) > 0:
+                self.pair_embeddings = np.vstack([self.pair_embeddings, new_embs])
+            else:
+                self.pair_embeddings = new_embs
+            self.pairs.extend(new_pairs)
+
+        logger.info(f"  Augmented: +{stats['extra_entities']} coref entities, "
+                     f"+{stats['coref_edges']} coref edges, "
+                     f"+{stats['cross_pairs']} cross-sentence pairs, "
+                     f"+{stats['cross_edges']} cross edges, "
+                     f"+{len(new_pairs)} new pair embeddings")
+        logger.info(f"  Graph now: {self.graph.vcount()} nodes, {self.graph.ecount()} edges")
+
     def build(self, docs: List[str], ner_results: Dict[str, List[str]]):
         """Build index from docs and pre-computed NER results.
 
@@ -832,13 +965,14 @@ def _mini_ppr_select_seeds(
 ) -> List[Tuple[int, int, float]]:
     """Run mini-PPR from bridge entities on local 5-hop subgraph.
 
+    discovered_vertex_ids: {name: (vid, weight)} where weight incorporates decay.
     Returns list of (bridge_vid, seed_vid, ppr_score) for selected connections.
     """
     graph = graph if graph is not None else index.graph
     passage_idx_set = set(index.passage_node_idxs)
 
     # Build subgraph from round 0 top docs' entities + bridge + seeds
-    core_vids = set(discovered_vertex_ids.values()) | set(existing_seed_vertex_ids)
+    core_vids = set(vid for vid, w in discovered_vertex_ids.values()) | set(existing_seed_vertex_ids)
     if round0_top_doc_ids is not None:
         for doc_id in round0_top_doc_ids:
             if doc_id < len(index.passage_node_idxs):
@@ -864,11 +998,11 @@ def _mini_ppr_select_seeds(
     vid_to_sub = {vid: i for i, vid in enumerate(subgraph_vids)}
     n_sub = len(subgraph_vids)
 
-    # All bridge entities together as seeds
+    # All bridge entities as seeds, weighted by decay
     reset = np.zeros(n_sub)
-    for d_vid in discovered_vertex_ids.values():
+    for d_vid, d_weight in discovered_vertex_ids.values():
         if d_vid in vid_to_sub:
-            reset[vid_to_sub[d_vid]] = 1.0
+            reset[vid_to_sub[d_vid]] = d_weight
     if reset.sum() == 0:
         return []
     reset /= reset.sum()
@@ -884,7 +1018,7 @@ def _mini_ppr_select_seeds(
 
     # Collect seed scores above threshold
     selected = []
-    bridge_vids = set(discovered_vertex_ids.values())
+    bridge_vids = set(vid for vid, w in discovered_vertex_ids.values())
     seed_scores = []
     for s_vid in existing_seed_vertex_ids:
         if s_vid not in bridge_vids and s_vid in vid_to_sub:
@@ -1062,33 +1196,38 @@ def iterative_retrieve(index, question: str, llm_client, max_rounds: int = 3,
         extra_node_weights = None
         if all_discovered and base_node_weights is not None:
             # all_discovered: {name: (vid, sim, discover_round)}
-            discovered_vid_only = {name: vid for name, (vid, sim, disc_round) in all_discovered.items()}
-            existing_seeds = _get_existing_seed_ids(index, base_node_weights)
-            ppr_connections = _mini_ppr_select_seeds(
-                index,
-                discovered_vertex_ids=discovered_vid_only,
-                existing_seed_vertex_ids=existing_seeds,
-                round0_top_doc_ids=round0_top_doc_ids,
-            )
-
             # Build vid -> (sim, decay_factor) lookup
             vid_to_sim = {}
+            discovered_with_decay = {}
             for name, (vid, sim, disc_round) in all_discovered.items():
                 decay = SEED_DECAY ** (round_i - disc_round)
                 vid_to_sim[vid] = (sim, decay)
+                discovered_with_decay[name] = (vid, decay)
+
+            existing_seeds = _get_existing_seed_ids(index, base_node_weights)
+            ppr_connections = _mini_ppr_select_seeds(
+                index,
+                discovered_vertex_ids=discovered_with_decay,
+                existing_seed_vertex_ids=existing_seeds,
+                round0_top_doc_ids=round0_top_doc_ids,
+            )
 
             for d_vid, s_vid, _ in ppr_connections:
                 d_sim, d_decay = vid_to_sim.get(d_vid, (1.0, 1.0))
                 bridge_weight = _degree_adaptive_weight(index, d_vid, 1.0, sim=d_sim) * d_decay
                 temp_edges.append((d_vid, s_vid, bridge_weight))
-            d_list = [(vid, sim, disc_round) for name, (vid, sim, disc_round) in all_discovered.items()]
-            for i, (v1, s1, dr1) in enumerate(d_list):
-                for v2, s2, dr2 in d_list[i + 1:]:
-                    decay1 = SEED_DECAY ** (round_i - dr1)
-                    decay2 = SEED_DECAY ** (round_i - dr2)
-                    w = max(_degree_adaptive_weight(index, v1, 1.0, sim=s1) * decay1,
-                            _degree_adaptive_weight(index, v2, 1.0, sim=s2) * decay2)
-                    temp_edges.append((v1, v2, w))
+
+            # Inter-discovered edges: only connect entities from the same round
+            by_round = {}
+            for name, (vid, sim, disc_round) in all_discovered.items():
+                by_round.setdefault(disc_round, []).append((vid, sim, disc_round))
+            for dr, entities in by_round.items():
+                decay = SEED_DECAY ** (round_i - dr)
+                for i, (v1, s1, _) in enumerate(entities):
+                    for v2, s2, _ in entities[i + 1:]:
+                        w = max(_degree_adaptive_weight(index, v1, 1.0, sim=s1),
+                                _degree_adaptive_weight(index, v2, 1.0, sim=s2)) * decay
+                        temp_edges.append((v1, v2, w))
 
             # Seed weights with decay
             extra_node_weights = np.zeros(index.graph.vcount())
@@ -1114,11 +1253,22 @@ def iterative_retrieve(index, question: str, llm_client, max_rounds: int = 3,
             base_node_weights = current_node_weights
             round0_top_doc_ids = [int(d) for d in sorted_doc_ids[:20]]
 
-        round_weight = 1.0 + round_i * RRF_ROUND_BOOST
+        # Current round PPR scores (RRF-normalized)
+        current_rrf = np.zeros(num_docs)
         for rank, doc_id in enumerate(sorted_doc_ids):
-            rrf_scores[doc_id] += PIPELINE_RRF_WEIGHT * round_weight / (rrf_k + rank + 1)
+            current_rrf[doc_id] = 1.0 / (rrf_k + rank + 1)
 
-        final_sorted_ids = np.argsort(rrf_scores)[::-1]
+        # Final = history RRF (small weight) + current PPR (large weight)
+        # Normalize history by number of past rounds to keep range comparable
+        HISTORY_WEIGHT = 0.3
+        CURRENT_WEIGHT = 1.0
+        history_norm = rrf_scores / max(round_i, 1)
+        combined_scores = HISTORY_WEIGHT * history_norm + CURRENT_WEIGHT * current_rrf
+
+        # Accumulate current round into history for next round
+        rrf_scores += current_rrf
+
+        final_sorted_ids = np.argsort(combined_scores)[::-1]
         top_docs = [index.passages[index.passage_keys[idx]] for idx in final_sorted_ids[:10]]
 
         round_diag = {
@@ -1184,12 +1334,18 @@ def iterative_retrieve(index, question: str, llm_client, max_rounds: int = 3,
             for name, (vid, sim) in resolved.items():
                 if name not in all_discovered:
                     all_discovered[name] = (vid, sim, round_i)
+                else:
+                    # Re-discovered: average old and current round
+                    old_vid, old_sim, old_round = all_discovered[name]
+                    avg_round = (old_round + round_i) / 2.0
+                    all_discovered[name] = (old_vid, max(old_sim, sim), avg_round)
             logger.info(f"  Resolved {len(resolved)}/{len(discovered_entities)} bridge entities in graph")
             round_diag["discovered_entities_total"] = sorted(all_discovered.keys())
 
         round_diagnostics.append(round_diag)
 
-    final_sorted_ids = np.argsort(rrf_scores)[::-1]
+    # Final ranking: history + last round (already computed as combined_scores)
+    final_sorted_ids = np.argsort(combined_scores)[::-1]
     retrieved_docs = [index.passages[index.passage_keys[idx]] for idx in final_sorted_ids]
 
     rerank_limit = min(5, len(retrieved_docs))
@@ -1413,6 +1569,16 @@ def run_evaluation(args):
     output_path = _make_results_output_path(save_dir, mode, args.max_rounds)
 
     all_results = []
+    completed_idxs = set()
+    # Resume from existing results if available
+    resume_path = getattr(args, 'resume', None)
+    if resume_path and os.path.exists(resume_path):
+        with open(resume_path) as f:
+            prev = json.load(f)
+        prev_results = prev.get("results", [])
+        all_results = prev_results
+        completed_idxs = {r["idx"] for r in prev_results}
+        logger.info(f"Resuming from {resume_path}: {len(completed_idxs)} samples already done")
     total_start = time.time()
 
     global_index = None
@@ -1450,6 +1616,15 @@ def run_evaluation(args):
             logger.info(f"  Global index: {global_index.graph.vcount()} nodes, {global_index.graph.ecount()} edges")
             global_index.save(cache_path)
 
+        # Augment with cross-sentence relations if cache available
+        cross_cache_path = getattr(args, 'cross_sentence_cache', None)
+        if cross_cache_path and os.path.exists(cross_cache_path):
+            logger.info(f"Loading cross-sentence cache: {cross_cache_path}")
+            with open(cross_cache_path) as f:
+                cross_cache = json.load(f)
+            logger.info(f"  {len(cross_cache)} passages with cross-sentence relations")
+            global_index.augment_cross_sentence(cross_cache)
+
     for idx, sample in enumerate(data):
         question = sample.get("question", "")
         paragraphs = sample.get("paragraphs", [])
@@ -1461,6 +1636,10 @@ def run_evaluation(args):
             for para in paragraphs
             if para.get("is_supporting", False)
         ]
+
+        if idx in completed_idxs:
+            logger.info(f"[{idx+1}/{len(data)}] SKIP (already done)")
+            continue
 
         logger.info(f"[{idx+1}/{len(data)}] {question[:80]}...")
 
@@ -1652,6 +1831,10 @@ def main():
                         help="Reasoning mode: base, reasoning (graph-reshape), ircot")
     parser.add_argument("--global_index", action="store_true",
                         help="Build one global index from all samples' passages instead of per-sample")
+    parser.add_argument("--resume", type=str, default=None,
+                        help="Path to previous results JSON to resume from")
+    parser.add_argument("--cross_sentence_cache", type=str, default=None,
+                        help="Path to cross-sentence relations JSON for graph augmentation")
     args = parser.parse_args()
     # For reasoning/ircot, ensure max_rounds > 1
     if args.mode in ("reasoning", "ircot") and args.max_rounds <= 1:
