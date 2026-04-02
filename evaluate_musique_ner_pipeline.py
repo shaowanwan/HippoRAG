@@ -258,10 +258,9 @@ class NERIndex:
     def augment_cross_sentence(self, cross_cache: Dict[str, dict]):
         """Augment graph with cross-sentence relations and coreference.
 
-        cross_cache: {passage_text: {
-            "extra_entities_by_sentence": {"0": ["entity1"], ...},
-            "cross_sentence_pairs": [["e1", "e2", "description"], ...]
-        }}
+        - Hub filter: only add edges where entity appears in 2+ passages
+        - No parallel edges: existing edges get weight+1 via get_eid
+        - No synthetic sentence embeddings (pair embeddings only)
         """
         # Build passage_text → (passage_id, [sent_ids_in_order]) mapping
         passage_to_sents = defaultdict(list)
@@ -271,11 +270,15 @@ class NERIndex:
 
         text_to_passage_id = {text: pid for pid, text in self.passages.items()}
 
+        # Build entity_key → passage count for hub filtering
+        ent_passage_count = {k: len(v) for k, v in self.entity_to_passages.items()}
+
         new_edges = []
         new_weights = []
         new_pairs = []
         new_pair_texts = []
-        stats = {"extra_entities": 0, "coref_edges": 0, "cross_pairs": 0, "cross_edges": 0}
+        stats = {"extra_entities": 0, "coref_edges": 0, "coref_skipped": 0,
+                 "cross_pairs": 0, "cross_edges": 0, "cross_skipped": 0}
 
         for passage_text, relations in cross_cache.items():
             passage_id = text_to_passage_id.get(passage_text)
@@ -295,17 +298,19 @@ class NERIndex:
                 for ent_name in extra_ents:
                     ent_key = compute_hash(ent_name.lower(), prefix="entity-")
                     if ent_key not in self.node_name_to_idx:
-                        continue  # entity not in graph
+                        continue
                     if ent_key in existing_ent_keys:
-                        continue  # already in this sentence
+                        continue
+                    # Hub filter: only add if entity appears in 2+ passages
+                    if ent_passage_count.get(ent_key, 0) < 2:
+                        stats["coref_skipped"] += 1
+                        continue
 
-                    # Add entity to sentence
                     sent_data["entities"].append((ent_name.lower(), ent_key))
                     self.entity_to_sentences[ent_key].append(sent_id)
                     self.entity_to_passages[ent_key].add(passage_id)
                     stats["extra_entities"] += 1
 
-                    # New co-occurrence pairs with existing entities in this sentence
                     ent_idx = self.node_name_to_idx.get(ent_key)
                     for existing_text, existing_key in sent_data["entities"]:
                         if existing_key == ent_key:
@@ -314,15 +319,20 @@ class NERIndex:
                             continue
                         existing_idx = self.node_name_to_idx.get(existing_key)
                         if ent_idx is not None and existing_idx is not None:
-                            new_edges.append((ent_idx, existing_idx))
-                            new_weights.append(1.0)
+                            # Merge: existing edge weight+1, else new edge
+                            eid = self.graph.get_eid(ent_idx, existing_idx, error=False)
+                            if eid >= 0:
+                                self.graph.es[eid]["weight"] += 1.0
+                            else:
+                                new_edges.append((ent_idx, existing_idx))
+                                new_weights.append(1.0)
                             stats["coref_edges"] += 1
                             new_pairs.append((ent_name.lower(), ent_key, existing_text, existing_key, sent_id))
                             new_pair_texts.append(f"{ent_name.lower()} | {existing_text} | {sent_data['text']}")
 
                     existing_ent_keys.add(ent_key)
 
-            # 2) Cross-sentence pairs: add edges with synthetic sentence
+            # 2) Cross-sentence pairs: hub filter (both entities in 2+ passages)
             for pair in relations.get("cross_sentence_pairs", []):
                 if len(pair) < 3:
                     continue
@@ -333,38 +343,25 @@ class NERIndex:
                 idx2 = self.node_name_to_idx.get(k2)
                 if idx1 is None or idx2 is None:
                     continue
+                # Hub filter: both entities must appear in 2+ passages
+                if ent_passage_count.get(k1, 0) < 2 or ent_passage_count.get(k2, 0) < 2:
+                    stats["cross_skipped"] += 1
+                    continue
 
-                # Add graph edge
-                new_edges.append((idx1, idx2))
-                new_weights.append(1.0)
+                # Merge: existing edge weight+1, else new edge
+                eid = self.graph.get_eid(idx1, idx2, error=False)
+                if eid >= 0:
+                    self.graph.es[eid]["weight"] += 1.0
+                else:
+                    new_edges.append((idx1, idx2))
+                    new_weights.append(1.0)
                 stats["cross_pairs"] += 1
                 stats["cross_edges"] += 1
 
-                # Create synthetic sentence for pair embedding
-                synthetic_sent_id = f"cross-{passage_id}-{k1[:8]}-{k2[:8]}"
-                self.sentences[synthetic_sent_id] = {
-                    "text": desc,
-                    "passage_id": passage_id,
-                    "entities": [(e1.lower(), k1), (e2.lower(), k2)],
-                }
-                new_pairs.append((e1.lower(), k1, e2.lower(), k2, synthetic_sent_id))
-                new_pair_texts.append(f"{e1.lower()} | {e2.lower()} | {desc}")
+                # Cross-sentence: only add graph edge, NO pair embedding
+                # (synthetic descriptions shouldn't compete in seed selection)
 
-                # Ensure entities are linked to passage
-                self.entity_to_passages[k1].add(passage_id)
-                self.entity_to_passages[k2].add(passage_id)
-
-                # Add entity-passage edges if not already connected
-                p_idx = self.node_name_to_idx.get(passage_id)
-                if p_idx is not None:
-                    if not self.graph.are_connected(idx1, p_idx):
-                        new_edges.append((idx1, p_idx))
-                        new_weights.append(1.0)
-                    if not self.graph.are_connected(idx2, p_idx):
-                        new_edges.append((idx2, p_idx))
-                        new_weights.append(1.0)
-
-        # Add edges to graph
+        # Add new edges to graph (no parallel edges)
         if new_edges:
             self.graph.add_edges(new_edges, attributes={"weight": new_weights})
 
@@ -377,10 +374,9 @@ class NERIndex:
                 self.pair_embeddings = new_embs
             self.pairs.extend(new_pairs)
 
-        logger.info(f"  Augmented: +{stats['extra_entities']} coref entities, "
+        logger.info(f"  Augmented: +{stats['extra_entities']} coref entities (+{stats['coref_skipped']} skipped), "
                      f"+{stats['coref_edges']} coref edges, "
-                     f"+{stats['cross_pairs']} cross-sentence pairs, "
-                     f"+{stats['cross_edges']} cross edges, "
+                     f"+{stats['cross_pairs']} cross pairs (+{stats['cross_skipped']} skipped), "
                      f"+{len(new_pairs)} new pair embeddings")
         logger.info(f"  Graph now: {self.graph.vcount()} nodes, {self.graph.ecount()} edges")
 
@@ -1615,7 +1611,7 @@ def run_evaluation(args):
         # Augment with cross-sentence relations if cache available
         cross_cache_path = getattr(args, 'cross_sentence_cache', None)
         if cross_cache_path and os.path.exists(cross_cache_path):
-            augmented_pkl = cross_cache_path.replace('.json', '_augmented_index.pkl')
+            augmented_pkl = cross_cache_path.replace('.json', '_augmented_hub_index.pkl')
             if os.path.exists(augmented_pkl):
                 logger.info(f"Loading augmented index from {augmented_pkl}")
                 global_index = NERIndex.load(augmented_pkl, embedding_model=emb_model)
