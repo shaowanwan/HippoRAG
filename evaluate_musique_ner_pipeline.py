@@ -306,23 +306,19 @@ class NERIndex:
                     stats["extra_entities"] += 1
 
                     # New co-occurrence pairs with existing entities in this sentence
-                    for existing_text, existing_key in list(existing_ent_keys):
+                    ent_idx = self.node_name_to_idx.get(ent_key)
+                    for existing_text, existing_key in sent_data["entities"]:
                         if existing_key == ent_key:
                             continue
-                        ent_idx = self.node_name_to_idx.get(ent_key)
+                        if existing_key not in existing_ent_keys:
+                            continue  # skip entities we just added
                         existing_idx = self.node_name_to_idx.get(existing_key)
                         if ent_idx is not None and existing_idx is not None:
                             new_edges.append((ent_idx, existing_idx))
                             new_weights.append(1.0)
                             stats["coref_edges"] += 1
-                            # Pair for embedding
-                            existing_text_str = existing_key  # fallback
-                            for et, ek in sent_data["entities"]:
-                                if ek == existing_key:
-                                    existing_text_str = et
-                                    break
-                            new_pairs.append((ent_name.lower(), ent_key, existing_text_str, existing_key, sent_id))
-                            new_pair_texts.append(f"{ent_name.lower()} | {existing_text_str} | {sent_data['text']}")
+                            new_pairs.append((ent_name.lower(), ent_key, existing_text, existing_key, sent_id))
+                            new_pair_texts.append(f"{ent_name.lower()} | {existing_text} | {sent_data['text']}")
 
                     existing_ent_keys.add(ent_key)
 
@@ -338,7 +334,7 @@ class NERIndex:
                 if idx1 is None or idx2 is None:
                     continue
 
-                # Add graph edge
+                # Add graph edge (parallel edge OK, different source)
                 new_edges.append((idx1, idx2))
                 new_weights.append(1.0)
                 stats["cross_pairs"] += 1
@@ -372,7 +368,7 @@ class NERIndex:
         if new_edges:
             self.graph.add_edges(new_edges, attributes={"weight": new_weights})
 
-        # Compute pair embeddings for new pairs and append
+        # Compute pair embeddings for new pairs and append (no sentence embeddings for synthetic sentences)
         if new_pair_texts:
             new_embs = self.embedding_model.batch_encode(new_pair_texts)
             if self.pair_embeddings is not None and len(self.pair_embeddings) > 0:
@@ -1397,12 +1393,6 @@ def iterative_retrieve(index, question: str, llm_client, max_rounds: int = 3,
     final_sorted_ids = np.argsort(combined_scores)[::-1]
     retrieved_docs = [index.passages[index.passage_keys[idx]] for idx in final_sorted_ids]
 
-    rerank_limit = min(5, len(retrieved_docs))
-    if rerank_limit > 1:
-        reranked = _llm_reasoning_rerank(question, retrieved_docs[:rerank_limit], reasoning_traces, llm_client)
-        if reranked is not None:
-            retrieved_docs = reranked + retrieved_docs[rerank_limit:]
-
     return retrieved_docs, reasoning_traces, round_diagnostics
 
 
@@ -1672,7 +1662,14 @@ def run_evaluation(args):
             with open(cross_cache_path) as f:
                 cross_cache = json.load(f)
             logger.info(f"  {len(cross_cache)} passages with cross-sentence relations")
-            global_index.augment_cross_sentence(cross_cache)
+            augmented_cache_path = cross_cache_path.replace('.json', '_augmented_index.pkl')
+            if os.path.exists(augmented_cache_path):
+                logger.info(f"Loading augmented index from {augmented_cache_path}")
+                global_index = NERIndex.load(augmented_cache_path, embedding_model=emb_model)
+            else:
+                global_index.augment_cross_sentence(cross_cache)
+                global_index.save(augmented_cache_path)
+                logger.info(f"Saved augmented index to {augmented_cache_path}")
 
     for idx, sample in enumerate(data):
         question = sample.get("question", "")
