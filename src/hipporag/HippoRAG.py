@@ -554,7 +554,8 @@ class HippoRAG:
         if max_rounds is None:
             max_rounds = self.global_config.reasoning_max_rounds
 
-        controller = ReasoningController(self, max_rounds=max_rounds)
+        reasoning_version = os.environ.get("REASONING_VERSION", "v1")
+        controller = ReasoningController(self, max_rounds=max_rounds, reasoning_version=reasoning_version)
         return controller.iterative_retrieve(
             queries=queries,
             num_to_retrieve=num_to_retrieve,

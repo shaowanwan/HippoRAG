@@ -34,6 +34,11 @@ MINI_PPR_THRESHOLD = 0.0001
 PIPELINE_RRF_WEIGHT = float(os.environ.get("PIPELINE_RRF_WEIGHT", "0.5"))
 EXPANSION_RRF_WEIGHT = float(os.environ.get("EXPANSION_RRF_WEIGHT", "1.0"))
 
+# v2 reasoning constants
+SEED_DECAY = 0.5          # Bridge entity weight decays by 0.5^age each round
+HISTORY_RRF_WEIGHT = 0.3  # Weight for history RRF in two-way combination
+CURRENT_RRF_WEIGHT = 1.0  # Weight for current round PPR in two-way combination
+
 
 
 
@@ -47,9 +52,10 @@ class ReasoningController:
       3. Resolve entities → seed expansion + bridge edges → extra PPR → RRF
     """
 
-    def __init__(self, hipporag, max_rounds: int = 3):
+    def __init__(self, hipporag, max_rounds: int = 3, reasoning_version: str = "v1"):
         self.hipporag = hipporag
         self.max_rounds = max_rounds
+        self.reasoning_version = reasoning_version  # "v1" (original) or "v2" (seed decay + two-way RRF)
         self.query_rewriter = QueryRewriter(hipporag.llm_model)
 
     def iterative_retrieve(
@@ -421,11 +427,13 @@ class ReasoningController:
         self,
         query: str,
         working_graph=None,
+        extra_node_weights=None,
     ) -> Tuple[np.ndarray, np.ndarray, Optional[np.ndarray]]:
         """Run full HippoRAG retrieval for a single query.
 
         Returns:
             (sorted_doc_ids, sorted_doc_scores, node_weights)
+            node_weights are the pipeline-only weights (before extra_node_weights).
         """
         hip = self.hipporag
 
@@ -446,6 +454,7 @@ class ReasoningController:
                 top_k_facts=top_k_facts,
                 top_k_fact_indices=top_k_fact_indices,
                 passage_node_weight=hip.global_config.passage_node_weight,
+                extra_node_weights=extra_node_weights,
                 working_graph=working_graph,
                 return_node_weights=True,
             )
@@ -461,13 +470,19 @@ class ReasoningController:
         hip = self.hipporag
         num_docs = len(hip.passage_node_keys)
         rrf_k = 60
+        use_v2 = self.reasoning_version == "v2"
 
         rrf_scores = np.zeros(num_docs)
         base_node_weights = None
-        all_discovered = {}  # name -> vertex_id, accumulated across rounds
+        if use_v2:
+            # v2: name -> (vertex_id, discovery_round)
+            all_discovered = {}
+        else:
+            # v1: name -> vertex_id
+            all_discovered = {}
         doc_first_round = {}  # doc_id -> first round it appeared in top-K
         round0_top_doc_ids = None  # top doc IDs from round 0
-        overlay_edges = []  # accumulated bridge edges across rounds
+        overlay_edges = []  # accumulated bridge edges across rounds (v1 only)
 
         for round_i in range(self.max_rounds):
             state.round_idx = round_i
@@ -475,82 +490,152 @@ class ReasoningController:
 
             logger.info(f"  Round {round_i}: query='{state.current_query[:60]}...'")
 
-            # Step 1: Get pipeline seeds (fact/sentence matching)
-            sorted_doc_ids, sorted_doc_scores, node_weights = self._retrieve_single_query(
-                state.current_query,
-            )
-            if node_weights is not None:
-                base_node_weights = node_weights
+            if use_v2:
+                # ── v2 flow: build overlay + bridge seeds FIRST, then one retrieve call ──
+                extra_node_weights = None
+                working_graph = None
 
-            if round_i == 0:
-                round0_top_doc_ids = [int(d) for d in sorted_doc_ids[:20]]
+                if all_discovered and round0_base_weights is not None:
+                    # existing_seeds from round 0 (for mini-PPR)
+                    existing_seeds = self._get_existing_seed_ids(round0_base_weights)
+                    discovered_vids = {name: vid for name, (vid, _) in all_discovered.items()}
 
-            # Step 2: Build merged seeds and run single PPR
-            if all_discovered and base_node_weights is not None:
-                existing_seeds = self._get_existing_seed_ids(base_node_weights)
+                    ppr_connections = self._mini_ppr_select_seeds(
+                        discovered_vertex_ids=discovered_vids,
+                        existing_seed_vertex_ids=existing_seeds,
+                        round0_top_doc_ids=round0_top_doc_ids,
+                        graph=hip.graph,
+                    )
 
-                # Mini-PPR on full graph to select bridge edges
-                ppr_connections = self._mini_ppr_select_seeds(
-                    discovered_vertex_ids=all_discovered,
-                    existing_seed_vertex_ids=existing_seeds,
-                    round0_top_doc_ids=round0_top_doc_ids,
-                    graph=hip.graph,
+                    # Bridge extra node weights (with decay)
+                    extra_node_weights = np.zeros(len(hip.graph.vs))
+                    for name, (vid, disc_round) in all_discovered.items():
+                        decay = SEED_DECAY ** (round_i - disc_round)
+                        extra_node_weights[vid] += self._degree_adaptive_weight(vid, DEFAULT_ENTITY_SEED_WEIGHT) * decay
+
+                    # Build overlay (fresh each round, not accumulated)
+                    overlay = GraphOverlay(hip.graph)
+                    selected_pairs = set()
+
+                    for d_vid, s_vid, score in ppr_connections:
+                        d_name = next((n for n, (v, _) in all_discovered.items() if v == d_vid), None)
+                        disc_round = all_discovered[d_name][1] if d_name else round_i - 1
+                        decay = SEED_DECAY ** (round_i - disc_round)
+                        bridge_weight = self._degree_adaptive_weight(d_vid, 1.0) * decay
+                        overlay.add_reasoning_edge(d_vid, s_vid, bridge_weight)
+                        selected_pairs.add((d_vid, s_vid))
+
+                    # Same-round inter-discovered edges only
+                    from itertools import combinations
+                    by_round = {}
+                    for name, (vid, disc_round) in all_discovered.items():
+                        by_round.setdefault(disc_round, []).append(vid)
+                    for dr, vids in by_round.items():
+                        decay = SEED_DECAY ** (round_i - dr)
+                        for v1, v2 in combinations(vids, 2):
+                            w = max(self._degree_adaptive_weight(v1, 1.0),
+                                    self._degree_adaptive_weight(v2, 1.0)) * decay
+                            overlay.add_reasoning_edge(v1, v2, w)
+
+                    working_graph = overlay.get_working_graph()
+                    logger.info(
+                        f"  Overlay: {len(all_discovered)} bridge entities, "
+                        f"selected edges: {len(selected_pairs)}"
+                    )
+
+                # Single retrieve: pipeline seeds + bridge seeds + overlay → one PPR
+                sorted_doc_ids, sorted_doc_scores, node_weights = self._retrieve_single_query(
+                    state.current_query,
+                    working_graph=working_graph,
+                    extra_node_weights=extra_node_weights,
                 )
 
-                # Merge pipeline seeds + bridge entity seeds
-                merged_weights = base_node_weights.copy()
-                for name, vid in all_discovered.items():
-                    merged_weights[vid] += self._degree_adaptive_weight(vid, DEFAULT_ENTITY_SEED_WEIGHT)
-
-                # Build overlay on full graph with accumulated bridge edges
-                overlay = GraphOverlay(hip.graph)
-                selected_pairs = set()
-                for d_vid, s_vid, score in ppr_connections:
-                    bridge_weight = self._degree_adaptive_weight(d_vid, 1.0)
-                    overlay.add_reasoning_edge(d_vid, s_vid, bridge_weight)
-                    selected_pairs.add((d_vid, s_vid))
-
-                # Inter-discovered edges
-                d_list = list(all_discovered.values())
-                for i, v1 in enumerate(d_list):
-                    for v2 in d_list[i+1:]:
-                        w = max(self._degree_adaptive_weight(v1, 1.0),
-                                self._degree_adaptive_weight(v2, 1.0))
-                        overlay.add_reasoning_edge(v1, v2, w)
-
-                # Also add edges from previous rounds
-                for edge in overlay_edges:
-                    overlay.add_reasoning_edge(edge[0], edge[1], edge[2])
-
-                working_graph = overlay.get_working_graph() if overlay else None
-
-                # Single merged PPR: pipeline seeds + bridge seeds on overlay graph
-                sorted_doc_ids, sorted_doc_scores = hip.run_ppr(
-                    merged_weights,
-                    damping=EXPANSION_DAMPING,  # 0.7
-                    graph=working_graph,
+                if round_i == 0:
+                    round0_top_doc_ids = [int(d) for d in sorted_doc_ids[:20]]
+                    round0_base_weights = node_weights
+            else:
+                # ── v1 flow: retrieve first, then build overlay + second PPR ──
+                sorted_doc_ids, sorted_doc_scores, node_weights = self._retrieve_single_query(
+                    state.current_query,
                 )
+                if node_weights is not None:
+                    base_node_weights = node_weights
 
-                # Save new edges for next round
-                for d_vid, s_vid, score in ppr_connections:
-                    overlay_edges.append((d_vid, s_vid, self._degree_adaptive_weight(d_vid, 1.0)))
-                for i, v1 in enumerate(d_list):
-                    for v2 in d_list[i+1:]:
-                        w = max(self._degree_adaptive_weight(v1, 1.0),
-                                self._degree_adaptive_weight(v2, 1.0))
-                        overlay_edges.append((v1, v2, w))
+                if round_i == 0:
+                    round0_top_doc_ids = [int(d) for d in sorted_doc_ids[:20]]
 
-                logger.info(
-                    f"  Merged PPR (full graph): {len(all_discovered)} entities, "
-                    f"selected edges: {len(selected_pairs)}, overlay_total: {len(overlay_edges)}"
-                )
+                if all_discovered and base_node_weights is not None:
+                    existing_seeds = self._get_existing_seed_ids(base_node_weights)
 
-            # Step 3: RRF accumulate (later rounds weighted higher)
-            round_weight = 1.0 + round_i * RRF_ROUND_BOOST
-            for rank, doc_id in enumerate(sorted_doc_ids):
-                rrf_scores[doc_id] += round_weight / (rrf_k + rank + 1)
+                    ppr_connections = self._mini_ppr_select_seeds(
+                        discovered_vertex_ids=all_discovered,
+                        existing_seed_vertex_ids=existing_seeds,
+                        round0_top_doc_ids=round0_top_doc_ids,
+                        graph=hip.graph,
+                    )
 
-            final_sorted_ids = np.argsort(rrf_scores)[::-1]
+                    merged_weights = base_node_weights.copy()
+                    for name, vid in all_discovered.items():
+                        merged_weights[vid] += self._degree_adaptive_weight(vid, DEFAULT_ENTITY_SEED_WEIGHT)
+
+                    overlay = GraphOverlay(hip.graph)
+                    selected_pairs = set()
+                    for d_vid, s_vid, score in ppr_connections:
+                        bridge_weight = self._degree_adaptive_weight(d_vid, 1.0)
+                        overlay.add_reasoning_edge(d_vid, s_vid, bridge_weight)
+                        selected_pairs.add((d_vid, s_vid))
+
+                    d_list = list(all_discovered.values())
+                    for i, v1 in enumerate(d_list):
+                        for v2 in d_list[i+1:]:
+                            w = max(self._degree_adaptive_weight(v1, 1.0),
+                                    self._degree_adaptive_weight(v2, 1.0))
+                            overlay.add_reasoning_edge(v1, v2, w)
+
+                    for edge in overlay_edges:
+                        overlay.add_reasoning_edge(edge[0], edge[1], edge[2])
+
+                    working_graph = overlay.get_working_graph() if overlay else None
+                    sorted_doc_ids, sorted_doc_scores = hip.run_ppr(
+                        merged_weights,
+                        damping=EXPANSION_DAMPING,
+                        graph=working_graph,
+                    )
+
+                    for d_vid, s_vid, score in ppr_connections:
+                        overlay_edges.append((d_vid, s_vid, self._degree_adaptive_weight(d_vid, 1.0)))
+                    for i, v1 in enumerate(d_list):
+                        for v2 in d_list[i+1:]:
+                            w = max(self._degree_adaptive_weight(v1, 1.0),
+                                    self._degree_adaptive_weight(v2, 1.0))
+                            overlay_edges.append((v1, v2, w))
+
+                    logger.info(
+                        f"  Merged PPR (full graph): {len(all_discovered)} entities, "
+                        f"selected edges: {len(selected_pairs)}"
+                    )
+
+            # Step 3: RRF accumulate
+            if use_v2:
+                # v2: two-way RRF — normalized history + current
+                current_rrf = np.zeros(num_docs)
+                for rank, doc_id in enumerate(sorted_doc_ids):
+                    current_rrf[doc_id] = 1.0 / (rrf_k + rank + 1)
+
+                # Compute combined BEFORE accumulating into history
+                history_norm = rrf_scores / max(round_i, 1)
+                combined = HISTORY_RRF_WEIGHT * history_norm + CURRENT_RRF_WEIGHT * current_rrf
+                # Accumulate into history for next round
+                rrf_scores += current_rrf
+
+                final_sorted_ids = np.argsort(combined)[::-1]
+            else:
+                # v1: round-boosted RRF
+                round_weight = 1.0 + round_i * RRF_ROUND_BOOST
+                for rank, doc_id in enumerate(sorted_doc_ids):
+                    rrf_scores[doc_id] += round_weight / (rrf_k + rank + 1)
+                final_sorted_ids = np.argsort(rrf_scores)[::-1]
+
             top_k_docs = [
                 hip.chunk_embedding_store.get_row(hip.passage_node_keys[idx])["content"]
                 for idx in final_sorted_ids[:num_to_retrieve]
@@ -608,31 +693,32 @@ class ReasoningController:
             if discovered_entities:
                 logger.info(f"  Discovered entities: {discovered_entities}")
                 resolved = self._resolve_entities(discovered_entities)
-                all_discovered.update(resolved)
+                if use_v2:
+                    # v2: store (vertex_id, discovery_round), re-discovered entities average round
+                    for name, vid in resolved.items():
+                        if name in all_discovered:
+                            old_vid, old_round = all_discovered[name]
+                            avg_round = (old_round + round_i) / 2.0
+                            all_discovered[name] = (vid, avg_round)
+                        else:
+                            all_discovered[name] = (vid, round_i)
+                else:
+                    all_discovered.update(resolved)
                 state.discovered_entities.extend(
                     [(name, vid) for name, vid in resolved.items()]
                 )
                 logger.info(f"  Total resolved entities: {len(all_discovered)}")
 
-        final_sorted_ids = np.argsort(rrf_scores)[::-1]
+        # Final ranking: use final_sorted_ids from the last iteration of the loop
+        if not use_v2:
+            final_sorted_ids = np.argsort(rrf_scores)[::-1]
+        # v2: final_sorted_ids already set in the loop's last iteration
 
         final_docs = [
             hip.chunk_embedding_store.get_row(hip.passage_node_keys[idx])["content"]
             for idx in final_sorted_ids[:num_to_retrieve]
         ]
         final_scores = [rrf_scores[idx] for idx in final_sorted_ids[:num_to_retrieve]]
-
-        # LLM reranker: reorder top-5 docs based on reasoning trajectory
-        # Rerank limit must match QA doc count to avoid unfair advantage
-        rerank_limit = min(5, len(final_docs))
-        if state.reasoning_traces and rerank_limit > 1:
-            reranked_docs = self._llm_reasoning_rerank(
-                query=state.original_query,
-                docs=final_docs[:rerank_limit],
-                reasoning_traces=state.reasoning_traces,
-            )
-            if reranked_docs is not None:
-                final_docs = reranked_docs + final_docs[rerank_limit:]
 
         return QuerySolution(
             question=state.original_query,

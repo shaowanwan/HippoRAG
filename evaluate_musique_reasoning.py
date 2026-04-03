@@ -230,6 +230,8 @@ def run_evaluation(data, sample_limit, max_rounds, openie_cache=None):
     if getattr(_rc, 'EXPANSION_RRF_WEIGHT', 1.0) != 1.0 or getattr(_rc, 'PIPELINE_RRF_WEIGHT', 0.5) != 0.5:
         save_dir = save_dir + f"__rrf_{_rc.PIPELINE_RRF_WEIGHT}_{_rc.EXPANSION_RRF_WEIGHT}"
 
+    reasoning_version = os.environ.get("REASONING_VERSION", "v1")
+
     os.makedirs(save_dir, exist_ok=True)
 
     api_key = os.getenv("OPENAI_API_KEY") or os.getenv("DASHSCOPE_API_KEY")
@@ -245,6 +247,7 @@ def run_evaluation(data, sample_limit, max_rounds, openie_cache=None):
         "llm": llm_model_name,
         "embedding": embedding_model_name,
         "openie_cache": openie_cache,
+        "reasoning_version": reasoning_version,
     }
 
     # Load pre-computed OpenIE cache and build text->openie_info lookup
@@ -263,7 +266,8 @@ def run_evaluation(data, sample_limit, max_rounds, openie_cache=None):
                 text_key = parts[1] if len(parts) > 1 else doc["passage"]
             openie_text_lookup[text_key] = doc
         logger.info(f"Loaded {len(openie_text_lookup)} docs from OpenIE cache")
-    output_path = os.path.join(save_dir, "comparison_results_fullcorpus.json")
+    output_suffix = f"_fullcorpus_{reasoning_version}" if reasoning_version != "v1" else "_fullcorpus"
+    output_path = os.path.join(save_dir, f"comparison_results{output_suffix}.json")
     all_results = []
 
     # Check for existing progress
