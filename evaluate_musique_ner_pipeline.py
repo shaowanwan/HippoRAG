@@ -1198,145 +1198,41 @@ Important: include ALL document numbers exactly once."""
 def iterative_retrieve(index, question: str, llm_client, max_rounds: int = 3,
                        gold_docs: List[str] = None, query_entities: Optional[List[str]] = None,
                        entity_top_k: int = 5):
-    """Multi-round retrieval with one retrieval pass per round.
+    """Naive reasoning: only query rewrite, no bridge entities, no RRF, static graph.
 
-    Core semantics:
-      1. Each round: single PPR on full graph + temp edges from all_discovered
-      2. Seed weights decay across rounds (decay=0.5 per round since discovery)
-      3. No hop-5 subgraph
-      4. RRF accumulates doc scores across rounds
+    Each round: LLM rewrites query → re-retrieve on static graph → use latest result only.
     """
-    SEED_DECAY = 0.5
-    num_docs = len(index.passage_keys)
-    rrf_k = 60
-    rrf_scores = np.zeros(num_docs)
     current_query = question
     reasoning_traces = []
     round_diagnostics = []
-    all_discovered = {}
-    base_node_weights = None
-    round0_top_doc_ids = None
 
     for round_i in range(max_rounds):
         logger.info(f"  Round {round_i}: query='{current_query[:60]}...'")
 
-        # Round 1+: enrich query embedding with key entities from current query
-        if round_i > 0:
-            round_entities = query_ner(current_query, llm_client)
-            if round_entities:
-                retrieve_query = " | ".join(round_entities) + " | " + current_query
-                logger.info(f"  Enriched query: '{retrieve_query[:80]}...'")
-            else:
-                retrieve_query = current_query
-        else:
-            retrieve_query = current_query
-
-        # Build this-round temp edges from all_discovered (freshly computed, not accumulated)
-        temp_edges = []
-        extra_node_weights = None
-        if all_discovered and base_node_weights is not None:
-            # Compute query-pair sim for all bridge entities (sentence-level relevance)
-            query_sims = _get_bridge_query_sims(index, all_discovered, retrieve_query)
-
-            # Build vid -> (query_sim, decay_factor) lookup
-            vid_to_info = {}
-            discovered_with_decay = {}
-            for name, (vid, res_sim, disc_round) in all_discovered.items():
-                decay = SEED_DECAY ** (round_i - disc_round)
-                q_sim = query_sims.get(vid, 1.0)
-                vid_to_info[vid] = (q_sim, decay)
-                discovered_with_decay[name] = (vid, decay)
-
-            existing_seeds = _get_existing_seed_ids(index, base_node_weights)
-            ppr_connections = _mini_ppr_select_seeds(
-                index,
-                discovered_vertex_ids=discovered_with_decay,
-                existing_seed_vertex_ids=existing_seeds,
-                round0_top_doc_ids=round0_top_doc_ids,
-            )
-
-            for d_vid, s_vid, _ in ppr_connections:
-                d_qsim, d_decay = vid_to_info.get(d_vid, (1.0, 1.0))
-                bridge_weight = _degree_adaptive_weight(index, d_vid, 1.0, sim=d_qsim) * d_decay
-                temp_edges.append((d_vid, s_vid, bridge_weight))
-
-            # Inter-discovered edges: only connect entities from the same round
-            by_round = {}
-            for name, (vid, res_sim, disc_round) in all_discovered.items():
-                q_sim = query_sims.get(vid, 1.0)
-                by_round.setdefault(disc_round, []).append((vid, q_sim, disc_round))
-            for dr, entities in by_round.items():
-                decay = SEED_DECAY ** (round_i - dr)
-                for i, (v1, s1, _) in enumerate(entities):
-                    for v2, s2, _ in entities[i + 1:]:
-                        w = max(_degree_adaptive_weight(index, v1, 1.0, sim=s1),
-                                _degree_adaptive_weight(index, v2, 1.0, sim=s2)) * decay
-                        temp_edges.append((v1, v2, w))
-
-            # Seed weights with decay (using query-pair sim)
-            extra_node_weights = np.zeros(index.graph.vcount())
-            for name, (vid, res_sim, disc_round) in all_discovered.items():
-                decay = SEED_DECAY ** (round_i - disc_round)
-                q_sim = query_sims.get(vid, 1.0)
-                extra_node_weights[vid] += _degree_adaptive_weight(index, vid, DEFAULT_ENTITY_SEED_WEIGHT, sim=q_sim) * decay
-
-            logger.info(f"  Overlay: {len(all_discovered)} bridge entities, {len(temp_edges)} temp edges")
-
-        # Single PPR on full graph + temp edges
-        working_graph = _build_overlay_graph(index, temp_edges) if temp_edges else index.graph
-
-        sorted_doc_ids, sorted_doc_scores, current_node_weights = index.retrieve(
-            retrieve_query,
-            working_graph=working_graph,
-            extra_node_weights=extra_node_weights,
+        # Retrieve with current query on static graph (no temp edges, no extra seeds)
+        sorted_doc_ids, sorted_doc_scores, _ = index.retrieve(
+            current_query,
             return_node_weights=True,
             query_entities=None,
         )
-        base_top_docs = [index.passages[index.passage_keys[idx]] for idx in sorted_doc_ids[:10]]
-
-        if round_i == 0:
-            base_node_weights = current_node_weights
-            round0_top_doc_ids = [int(d) for d in sorted_doc_ids[:20]]
-
-        # Current round PPR scores (RRF-normalized)
-        current_rrf = np.zeros(num_docs)
-        for rank, doc_id in enumerate(sorted_doc_ids):
-            current_rrf[doc_id] = 1.0 / (rrf_k + rank + 1)
-
-        # Final = history RRF (small weight) + current PPR (large weight)
-        # Normalize history by number of past rounds to keep range comparable
-        HISTORY_WEIGHT = 0.3
-        CURRENT_WEIGHT = 1.0
-        history_norm = rrf_scores / max(round_i, 1)
-        combined_scores = HISTORY_WEIGHT * history_norm + CURRENT_WEIGHT * current_rrf
-
-        # Accumulate current round into history for next round
-        rrf_scores += current_rrf
-
-        final_sorted_ids = np.argsort(combined_scores)[::-1]
-        top_docs = [index.passages[index.passage_keys[idx]] for idx in final_sorted_ids[:10]]
+        top_docs = [index.passages[index.passage_keys[idx]] for idx in sorted_doc_ids[:10]]
 
         round_diag = {
             "round_idx": round_i,
             "query": current_query,
             "base_top_doc_ids": [int(idx) for idx in sorted_doc_ids[:10]],
-            "rrf_top_doc_ids": [int(idx) for idx in final_sorted_ids[:10]],
-            "bridge_edges": len(temp_edges),
-            "discovered_entities_total": sorted(all_discovered.keys()),
+            "rrf_top_doc_ids": [int(idx) for idx in sorted_doc_ids[:10]],
+            "bridge_edges": 0,
+            "discovered_entities_total": [],
         }
         if gold_docs is not None:
             round_diag["base_recall"] = {
-                "R@1": recall_at_k(base_top_docs, gold_docs, 1),
-                "R@2": recall_at_k(base_top_docs, gold_docs, 2),
-                "R@5": recall_at_k(base_top_docs, gold_docs, 5),
-                "R@10": recall_at_k(base_top_docs, gold_docs, 10),
-            }
-            round_diag["rrf_recall"] = {
                 "R@1": recall_at_k(top_docs, gold_docs, 1),
                 "R@2": recall_at_k(top_docs, gold_docs, 2),
                 "R@5": recall_at_k(top_docs, gold_docs, 5),
                 "R@10": recall_at_k(top_docs, gold_docs, 10),
             }
+            round_diag["rrf_recall"] = round_diag["base_recall"]
 
         if round_i == max_rounds - 1:
             round_diag["stop"] = False
@@ -1360,7 +1256,7 @@ def iterative_retrieve(index, question: str, llm_client, max_rounds: int = 3,
 
         reasoning_traces.append(reasoning_output.get("analysis", ""))
         round_diag["rewritten_query"] = reasoning_output.get("rewritten_query", "")
-        round_diag["new_discovered_entities"] = reasoning_output.get("discovered_entities", [])
+        round_diag["new_discovered_entities"] = []
         round_diag["stop"] = reasoning_output.get("should_stop", False)
 
         if reasoning_output.get("should_stop", False):
@@ -1373,25 +1269,10 @@ def iterative_retrieve(index, question: str, llm_client, max_rounds: int = 3,
             logger.info(f"  Round {round_i} rewrite: '{new_query[:60]}...'")
             current_query = new_query
 
-        discovered_entities = reasoning_output.get("discovered_entities", [])
-        if discovered_entities:
-            resolved = _resolve_entities_in_graph(index, discovered_entities)
-            for name, (vid, sim) in resolved.items():
-                if name not in all_discovered:
-                    all_discovered[name] = (vid, sim, round_i)
-                else:
-                    # Re-discovered: average old and current round
-                    old_vid, old_sim, old_round = all_discovered[name]
-                    avg_round = (old_round + round_i) / 2.0
-                    all_discovered[name] = (old_vid, max(old_sim, sim), avg_round)
-            logger.info(f"  Resolved {len(resolved)}/{len(discovered_entities)} bridge entities in graph")
-            round_diag["discovered_entities_total"] = sorted(all_discovered.keys())
-
         round_diagnostics.append(round_diag)
 
-    # Final ranking: history + last round (already computed as combined_scores)
-    final_sorted_ids = np.argsort(combined_scores)[::-1]
-    retrieved_docs = [index.passages[index.passage_keys[idx]] for idx in final_sorted_ids]
+    # Final: just use last round's retrieval result (no RRF)
+    retrieved_docs = [index.passages[index.passage_keys[idx]] for idx in sorted_doc_ids]
 
     return retrieved_docs, reasoning_traces, round_diagnostics
 
