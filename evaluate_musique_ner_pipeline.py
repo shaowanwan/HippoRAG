@@ -809,27 +809,45 @@ MINI_PPR_THRESHOLD = 0.0001
 PIPELINE_RRF_WEIGHT = 1.0
 EXPANSION_RRF_WEIGHT = 1.0
 
-# Prompt (from feature/graph-reshape query_rewriter.py — includes discovered_entities)
-REWRITE_SYSTEM_PROMPT = """You are a retrieval reasoning assistant. Given an original query, the documents retrieved so far, and optionally a reasoning trace, your job is to:
+# Prompt (scenario-in-trace variant: scenario stays in trace, NOT in retrieval query)
+REWRITE_SYSTEM_PROMPT = """You are a retrieval reasoning assistant inspired by how human memory uses both observed cues and hypothetical context. Given an original query, the documents retrieved so far, and optionally a reasoning trace, your job is to:
 
 1. Analyze what information has been found and what is still missing.
-2. Identify key bridge entities in the retrieved documents that connect to the missing information.
-3. Rewrite the query to better target the missing information.
-4. Decide whether to continue retrieval or stop.
+2. Identify CONCRETE bridge entities you SEE in retrieved documents (these will guide structured retrieval).
+3. Hypothesize a CONTEXT SCENARIO — natural language describing the likely time period, location, domain, or related concepts (this is your reasoning context, NOT the retrieval query).
+4. Rewrite the query using ONLY bridge entities and the original question — keep it focused and short. Do NOT include the context_scenario in the rewritten_query.
+5. Decide whether to continue retrieval or stop.
 
 Respond in JSON format:
 {
     "analysis": "Brief analysis of what's found vs missing",
     "discovered_entities": ["entity1", "entity2"],
-    "rewritten_query": "The rewritten query targeting missing info",
+    "context_scenario": "Hypothesized context: time period, location, domain, related concepts",
+    "rewritten_query": "Focused natural language query with bridge entities only",
     "should_stop": false
 }
 
 Rules:
-- If the retrieved documents already contain sufficient information to answer the query, set should_stop=true and leave rewritten_query empty.
-- "discovered_entities" should list key entities found in the retrieved documents that are important for answering the query but were NOT in the original query. These are bridge entities that connect what's been found to what's still needed. Use lowercase. List 1-5 entities max.
-- Rewritten query should be a natural language question, not keywords. It should incorporate discovered bridge entities.
-- Focus on what information is missing and craft the query to find it.
+- "discovered_entities": ONLY entities you can directly SEE in retrieved documents. 1-5 entities max. Use lowercase. DO NOT guess.
+- "context_scenario": Short natural language description of the hypothesized context. Stored as your reasoning trace and seen by future rounds, but NOT used directly for retrieval. Examples:
+  * "Likely 16th century European religious reform, possibly Lutheran/Calvinist figures"
+  * "North Carolina state administration history, 18-19th century capital designation"
+  * "Modern NBA basketball event, post-2000 era"
+- "rewritten_query": Focused query using ONLY bridge entities + reformulation of the original question. DO NOT add context_scenario, time periods, or hypothesized terms here. Keep it short and concrete.
+- "should_stop": true ONLY if retrieved documents already contain a complete answer.
+
+Example:
+Q: "When did the city where Curry's college is located become NC's capital?"
+After round 0 finding Stephen Curry and Davidson College:
+{
+    "analysis": "Found Curry attended Davidson College in NC. Need the city of Davidson and its history as state capital.",
+    "discovered_entities": ["davidson college", "north carolina"],
+    "context_scenario": "Likely 18-19th century North Carolina state administration history; possibly involving Raleigh or another NC city becoming the state capital.",
+    "rewritten_query": "When did Davidson, North Carolina become the state capital?",
+    "should_stop": false
+}
+
+Note: rewritten_query is short, only uses bridge entities. The "18-19th century" hint stays in context_scenario, NOT in rewritten_query.
 """
 
 
@@ -858,7 +876,7 @@ Retrieved documents so far:
         {"role": "user", "content": user_content},
     ]
 
-    defaults = {"analysis": "", "discovered_entities": [], "rewritten_query": "", "should_stop": False}
+    defaults = {"analysis": "", "discovered_entities": [], "context_scenario": "", "rewritten_query": "", "should_stop": False}
     try:
         response = llm_client.infer(messages=messages)
         if isinstance(response, tuple):
@@ -874,12 +892,18 @@ Retrieved documents so far:
         for key in defaults:
             if key not in parsed:
                 parsed[key] = defaults[key]
-        # Ensure discovered_entities is a list of lowercase strings
+        # Ensure discovered_entities is concrete only (from docs)
         if not isinstance(parsed.get("discovered_entities", []), list):
             parsed["discovered_entities"] = []
         parsed["discovered_entities"] = [
             str(e).lower().strip() for e in parsed["discovered_entities"] if e
         ][:5]
+        # context_scenario stays as a string (used in trace, NOT in rewritten_query)
+        ctx = parsed.get("context_scenario", "")
+        if not isinstance(ctx, str):
+            ctx = ""
+        parsed["context_scenario"] = ctx.strip()
+        # IMPORTANT: do NOT modify rewritten_query — keep it clean
         return parsed
     except Exception as e:
         logger.warning(f"Reasoning failed: {e}")
@@ -1358,9 +1382,17 @@ def iterative_retrieve(index, question: str, llm_client, max_rounds: int = 3,
             logger.warning(f"  Reasoning error at round {round_i}: {e}")
             break
 
-        reasoning_traces.append(reasoning_output.get("analysis", ""))
+        # Build trace with both analysis and context_scenario for next round
+        analysis_text = reasoning_output.get("analysis", "")
+        scenario_text = reasoning_output.get("context_scenario", "")
+        if scenario_text:
+            trace_text = f"{analysis_text} | Hypothesized context: {scenario_text}"
+        else:
+            trace_text = analysis_text
+        reasoning_traces.append(trace_text)
         round_diag["rewritten_query"] = reasoning_output.get("rewritten_query", "")
         round_diag["new_discovered_entities"] = reasoning_output.get("discovered_entities", [])
+        round_diag["context_scenario"] = scenario_text
         round_diag["stop"] = reasoning_output.get("should_stop", False)
 
         if reasoning_output.get("should_stop", False):
