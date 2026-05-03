@@ -850,8 +850,8 @@ Respond in JSON format:
 
 Rules:
 - If the retrieved documents already contain sufficient information to answer the query, set should_stop=true and leave rewritten_query empty.
-- "discovered_entities": List entities found in the documents that connect what is already confirmed to what is still missing. These bridge entities should help reach the missing information from the known facts. Use lowercase. List 1-5 entities max.
-- The rewritten query should ONLY target the missing gap, not repeat confirmed information. Keep it short and focused.
+- "discovered_entities": List 2-5 entities found in the documents that connect what is already confirmed to what is still missing. Include BOTH specific entities (person names, place names) AND broader contextual entities that could bridge to the missing information. Use lowercase. Always list at least 2.
+- The rewritten query should preserve the original query's structure and intent, but replace resolved references with discovered entities and focus on the remaining gap. Write it as a natural language question.
 - Build upon previous reasoning traces — do not abandon previously confirmed facts.
 """
 
@@ -1859,7 +1859,6 @@ def iterative_retrieve(index, question: str, llm_client, max_rounds: int = 3,
     base_node_weights = None
     round0_top_doc_ids = None
     per_round_seeds = []  # List of (normed_seed_vector, round_weight) per round
-    per_round_ppr_docs = []  # List of doc score arrays per round for PPR fusion
     accumulated_docs = []  # Accumulated unique docs across rounds for stable reasoning
     accumulated_de_seeds = {}  # Dead-end cross-passage seeds accumulated across rounds
     pruned_graph = None
@@ -2190,24 +2189,9 @@ def iterative_retrieve(index, question: str, llm_client, max_rounds: int = 3,
         # Accumulate current round into history for next round
         rrf_scores += current_rrf
 
-        # Save per-round PPR doc scores for fusion
-        _ppr_fusion = os.getenv("PPR_FUSION", "0") == "1"
-        if _ppr_fusion:
-            doc_scores_this_round = np.array([all_ppr_scores[idx_] for idx_ in index.passage_node_idxs]) if all_ppr_scores is not None else np.zeros(num_docs)
-            per_round_ppr_docs.append(doc_scores_this_round)
-
         # PRN + RRF mode
         _prn_with_rrf = os.getenv("PRN_WITH_RRF", "0") == "1"
-        if _ppr_fusion and round_i == max_rounds - 1 and len(per_round_ppr_docs) >= 2:
-            # Weighted PPR fusion: 0.1*R0 + 0.3*R1 + 0.6*R2
-            _fusion_weights = [float(x) for x in os.getenv("PPR_FUSION_WEIGHTS", "0.1,0.3,0.6").split(",")]
-            fused = np.zeros(num_docs)
-            for fi, fw in enumerate(_fusion_weights):
-                if fi < len(per_round_ppr_docs):
-                    fused += fw * per_round_ppr_docs[fi]
-            final_sorted_ids = np.argsort(fused)[::-1]
-            logger.info(f"  PPR fusion: {len(per_round_ppr_docs)} rounds, weights={_fusion_weights[:len(per_round_ppr_docs)]}")
-        elif _per_round_norm and not _prn_with_rrf:
+        if _per_round_norm and not _prn_with_rrf:
             final_sorted_ids = sorted_doc_ids
         else:
             final_sorted_ids = np.argsort(combined_scores)[::-1]
@@ -2630,11 +2614,7 @@ Output JSON only:
             logger.warning(f"  Reasoning error at round {round_i}: {e}")
             break
 
-        _analysis = reasoning_output.get("analysis", "")
-        # Only keep confirmed info in traces (remove missing/gap part to avoid anchoring)
-        if os.getenv("TRACE_CONFIRMED_ONLY", "0") == "1" and "|" in _analysis:
-            _analysis = _analysis.split("|")[0].strip()
-        reasoning_traces.append(_analysis)
+        reasoning_traces.append(reasoning_output.get("analysis", ""))
         round_diag["rewritten_query"] = reasoning_output.get("rewritten_query", "")
         round_diag["new_discovered_entities"] = reasoning_output.get("discovered_entities", [])
         round_diag["stop"] = reasoning_output.get("should_stop", False)
@@ -3071,10 +3051,11 @@ def run_evaluation(args):
     torch.manual_seed(args.seed)
 
     all_data = json.load(open(args.data_path))
-    if args.sample_limit and args.sample_limit < len(all_data):
-        data = all_data[:args.sample_limit]
+    offset = args.sample_offset
+    if args.sample_limit and args.sample_limit + offset < len(all_data):
+        data = all_data[offset:offset + args.sample_limit]
     else:
-        data = all_data
+        data = all_data[offset:]
     logger.info(f"Loaded {len(data)} samples (total {len(all_data)} in dataset)")
 
     embedding_model_name = os.getenv(
@@ -3404,6 +3385,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--data_path", type=str, default="musique.json")
     parser.add_argument("--sample_limit", type=int, default=30)
+    parser.add_argument("--sample_offset", type=int, default=0)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--ner_cache", type=str, default=None,
                         help="Path to pre-computed NER results JSON")
