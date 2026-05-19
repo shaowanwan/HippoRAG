@@ -851,6 +851,33 @@ Note: rewritten_query is short, only uses bridge entities. The "18-19th century"
 """
 
 
+# Variant: REWRITE_FIRST — swap step 2 (bridges) with step 4 (rewrite query).
+# Gated by env REWRITE_FIRST=1. Tests whether rewriting query BEFORE bridge discovery changes results.
+REWRITE_SYSTEM_PROMPT_REWRITE_FIRST = """You are a retrieval reasoning assistant inspired by how human memory uses both observed cues and hypothetical context. Given an original query, the documents retrieved so far, and optionally a reasoning trace, your job is to:
+
+1. Analyze what information has been found and what is still missing.
+2. Rewrite the query to better target the missing information — keep it focused and short.
+3. Hypothesize a CONTEXT SCENARIO — natural language describing the likely time period, location, domain, or related concepts (this is your reasoning context, NOT the retrieval query).
+4. Identify CONCRETE bridge entities you SEE in retrieved documents that help answer the rewritten query (these will guide structured retrieval).
+5. Decide whether to continue retrieval or stop.
+
+Respond in JSON format:
+{
+    "analysis": "Brief analysis of what's found vs missing",
+    "rewritten_query": "Focused natural language query targeting missing info",
+    "context_scenario": "Hypothesized context: time period, location, domain, related concepts",
+    "discovered_entities": ["entity1", "entity2"],
+    "should_stop": false
+}
+
+Rules:
+- "rewritten_query": Focused query targeting the missing piece. Short and concrete.
+- "context_scenario": Short natural language description of the hypothesized context. Stored as your reasoning trace and seen by future rounds, but NOT used directly for retrieval.
+- "discovered_entities": ONLY entities you can directly SEE in retrieved documents that help answer the rewritten query. 1-5 entities max. Use lowercase. DO NOT guess.
+- "should_stop": true ONLY if retrieved documents already contain a complete answer.
+"""
+
+
 def reason_and_rewrite(original_query: str, current_query: str, retrieved_docs: List[str],
                        round_idx: int, previous_traces: List[str], llm_client) -> dict:
     """LLM reasoning: analyze retrieved docs, rewrite query, discover bridge entities."""
@@ -871,8 +898,10 @@ Retrieved documents so far:
 
     user_content += "\nAnalyze and provide your reasoning output in JSON."
 
+    _rewrite_first = os.getenv("REWRITE_FIRST", "0") == "1"
+    _sys_prompt = REWRITE_SYSTEM_PROMPT_REWRITE_FIRST if _rewrite_first else REWRITE_SYSTEM_PROMPT
     messages = [
-        {"role": "system", "content": REWRITE_SYSTEM_PROMPT},
+        {"role": "system", "content": _sys_prompt},
         {"role": "user", "content": user_content},
     ]
 
@@ -1230,7 +1259,7 @@ def iterative_retrieve(index, question: str, llm_client, max_rounds: int = 3,
       3. No hop-5 subgraph
       4. RRF accumulates doc scores across rounds
     """
-    SEED_DECAY = 0.5
+    SEED_DECAY = float(os.getenv("SEED_DECAY", "0.5"))
     num_docs = len(index.passage_keys)
     rrf_k = 60
     rrf_scores = np.zeros(num_docs)
@@ -1634,7 +1663,9 @@ def run_evaluation(args):
             openie_cache[text_key] = entities
         logger.info(f"  {len(openie_cache)} docs with entities from OpenIE")
 
-    save_dir = "outputs/musique_ner_pipeline_eval"
+    # dataset-dependent save_dir
+    _data_name = os.path.splitext(os.path.basename(args.data_path))[0]
+    save_dir = f"outputs/{_data_name}_ner_pipeline_eval"
     os.makedirs(save_dir, exist_ok=True)
     mode = getattr(args, 'mode', 'base')
     output_path = _make_results_output_path(save_dir, mode, args.max_rounds)
