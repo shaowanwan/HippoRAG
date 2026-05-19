@@ -991,6 +991,8 @@ def _resolve_entities_in_graph(index, entity_names: List[str], threshold: float 
 
 def _degree_adaptive_weight(index, vid: int, base_weight: float, sim: float = 1.0) -> float:
     """Scale weight by semantic similarity and log(degree) to resist dilution at high-degree nodes."""
+    if os.getenv("NO_SIM_FACTOR", "0") == "1":
+        sim = 1.0
     deg = index.graph.degree(vid)
     return base_weight * sim * (1.0 + math.log(deg + 1))
 
