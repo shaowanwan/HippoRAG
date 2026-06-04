@@ -43,9 +43,18 @@ class TransformersEmbeddingModel(BaseEmbeddingModel):
 
     def batch_encode(self, texts: List[str], **kwargs) -> None:
         # Build instruction prompt for instruction-tuned models (e.g. GTE-Qwen2-7B-instruct)
+        # FIX 2026-05-17 (restored 2026-06-01 from stash@{0}): Only apply instruction prefix
+        # to instruction-tuned models. Non-instruction-tuned models (e.g. MiniLM) treat the
+        # prefix as plain text, corrupting query embedding
+        # (verified: cos(with,without)=0.61 on MiniLM, noise fact ranks above gold fact).
         prompt = None
         instruction = kwargs.get("instruction", "")
-        if instruction:
+        # NOTE: must use self.model_id (actual loaded model) not self.embedding_model_name
+        # (which defaults to global_config's nv-embed-v2 even when wrapping MiniLM)
+        _mname = self.model_id.lower()
+        is_instruction_tuned = ('instruct' in _mname or 'gte-qwen' in _mname
+                                or 'nv-embed' in _mname or 'gritlm' in _mname)
+        if instruction and is_instruction_tuned:
             prompt = f"Instruct: {instruction}\nQuery: "
 
         if len(texts) < self.batch_size:
