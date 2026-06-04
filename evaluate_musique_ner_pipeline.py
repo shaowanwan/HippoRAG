@@ -757,7 +757,25 @@ QA_ONE_SHOT_OUTPUT = (
 
 
 def llm_qa(query: str, docs: List[str], llm_client) -> str:
-    """QA with HippoRAG-aligned prompt: CoT Thought + Answer extraction."""
+    """QA with HippoRAG-aligned prompt: CoT Thought + Answer extraction.
+
+    BUG HISTORY (5/19 → fixed back here):
+      A 5/19 stash (4eebfc6) changed extraction to
+        re.search(r'Answer:?\\s*(.+?)(?:\\.\\s*$|\\n|$)', text, IGNORECASE|DOTALL)
+      The new regex was IGNORECASE and the colon was optional, so it matched
+      the word "answer" inside the Thought (e.g. "...so the answer is X..."),
+      extracting garbage before the real "Answer: Y" label.
+
+      Affected runs:
+        - 73034 (NER+ITER 1000):  stored EM 0.319, true EM 0.36–0.42
+        - 73197 (NER+IRCoT 1000): stored EM 0.264, true EM unknown (raw not saved)
+
+      Current behaviour reverted to the 4/21 split — see line below.
+      Do NOT replace with regex without preserving:
+        - case sensitivity on "Answer"
+        - mandatory colon
+        - single-line capture (no DOTALL)
+    """
     # Build prompt_user in same format as HippoRAG
     prompt_user = ''
     for passage in docs[:5]:
