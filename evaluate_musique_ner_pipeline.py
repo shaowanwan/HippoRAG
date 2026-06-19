@@ -1287,6 +1287,7 @@ def iterative_retrieve(index, question: str, llm_client, max_rounds: int = 3,
     reasoning_traces = []
     round_diagnostics = []
     all_discovered = {}
+    last_disc_round = {}  # name -> most recent discovery round (used by NO_PERSISTENCE ablation)
     base_node_weights = None
     round0_top_doc_ids = None
 
@@ -1312,7 +1313,7 @@ def iterative_retrieve(index, question: str, llm_client, max_rounds: int = 3,
             # (disc_round == round_i-1), not the accumulated set, to isolate the effect of
             # cross-round persistence. Default (unset) keeps the full accumulated behavior.
             if os.getenv("NO_PERSISTENCE", "0") == "1":
-                active_discovered = {n: v for n, v in all_discovered.items() if v[2] == round_i - 1}
+                active_discovered = {n: v for n, v in all_discovered.items() if last_disc_round.get(n) == round_i - 1}
             else:
                 active_discovered = all_discovered
             # Compute query-pair sim for all bridge entities (sentence-level relevance)
@@ -1472,6 +1473,7 @@ def iterative_retrieve(index, question: str, llm_client, max_rounds: int = 3,
                     old_vid, old_sim, old_round = all_discovered[name]
                     avg_round = (old_round + round_i) / 2.0
                     all_discovered[name] = (old_vid, max(old_sim, sim), avg_round)
+                last_disc_round[name] = round_i  # most recent discovery round (NO_PERSISTENCE)
             logger.info(f"  Resolved {len(resolved)}/{len(discovered_entities)} bridge entities in graph")
             round_diag["discovered_entities_total"] = sorted(all_discovered.keys())
 
