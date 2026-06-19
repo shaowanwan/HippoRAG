@@ -1308,13 +1308,20 @@ def iterative_retrieve(index, question: str, llm_client, max_rounds: int = 3,
         temp_edges = []
         extra_node_weights = None
         if all_discovered and base_node_weights is not None:
+            # NO_PERSISTENCE ablation: seed only with bridges discovered in the previous round
+            # (disc_round == round_i-1), not the accumulated set, to isolate the effect of
+            # cross-round persistence. Default (unset) keeps the full accumulated behavior.
+            if os.getenv("NO_PERSISTENCE", "0") == "1":
+                active_discovered = {n: v for n, v in all_discovered.items() if v[2] == round_i - 1}
+            else:
+                active_discovered = all_discovered
             # Compute query-pair sim for all bridge entities (sentence-level relevance)
-            query_sims = _get_bridge_query_sims(index, all_discovered, retrieve_query)
+            query_sims = _get_bridge_query_sims(index, active_discovered, retrieve_query)
 
             # Build vid -> (query_sim, decay_factor) lookup
             vid_to_info = {}
             discovered_with_decay = {}
-            for name, (vid, res_sim, disc_round) in all_discovered.items():
+            for name, (vid, res_sim, disc_round) in active_discovered.items():
                 decay = SEED_DECAY ** (round_i - disc_round)
                 q_sim = query_sims.get(vid, 1.0)
                 vid_to_info[vid] = (q_sim, decay)
@@ -1335,7 +1342,7 @@ def iterative_retrieve(index, question: str, llm_client, max_rounds: int = 3,
 
             # Inter-discovered edges: only connect entities from the same round
             by_round = {}
-            for name, (vid, res_sim, disc_round) in all_discovered.items():
+            for name, (vid, res_sim, disc_round) in active_discovered.items():
                 q_sim = query_sims.get(vid, 1.0)
                 by_round.setdefault(disc_round, []).append((vid, q_sim, disc_round))
             for dr, entities in by_round.items():
@@ -1348,12 +1355,12 @@ def iterative_retrieve(index, question: str, llm_client, max_rounds: int = 3,
 
             # Seed weights with decay (using query-pair sim)
             extra_node_weights = np.zeros(index.graph.vcount())
-            for name, (vid, res_sim, disc_round) in all_discovered.items():
+            for name, (vid, res_sim, disc_round) in active_discovered.items():
                 decay = SEED_DECAY ** (round_i - disc_round)
                 q_sim = query_sims.get(vid, 1.0)
                 extra_node_weights[vid] += _degree_adaptive_weight(index, vid, DEFAULT_ENTITY_SEED_WEIGHT, sim=q_sim) * decay
 
-            logger.info(f"  Overlay: {len(all_discovered)} bridge entities, {len(temp_edges)} temp edges")
+            logger.info(f"  Overlay: {len(active_discovered)} bridge entities, {len(temp_edges)} temp edges")
 
         # Single PPR on full graph + temp edges
         working_graph = _build_overlay_graph(index, temp_edges) if temp_edges else index.graph
