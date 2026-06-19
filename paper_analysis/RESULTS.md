@@ -69,7 +69,23 @@ C (58.4%) are QA failures consistent with MuSiQue being answerable without full 
 NOTE: this table was produced by the author's own (LLM-assisted) classification of the 113 win
 cases — no reproducible script is checked in. Content preserved here from the thesis slide.
 
+## 4. Component ablations (MuSiQue 1000, NER backbone)
+Canonical reference = 41732 (EM .396 / R@5 .623, MMR on, RRF on).
+
+| Ablation | EM | F1 | R@5 | vs reference | run |
+|---|---|---|---|---|---|
+| **canonical** (MMR on, RRF on) | .396 | — | .623 | — | 41732 |
+| **− RRF** (HISTORY_WEIGHT=0) | .370 | — | .582 | −1.4 EM / −4.1 R@5 (vs 25208 .384/.610) | 93436 (2026-06-18) |
+| **− MMR** (mmr_lambda=1.0) | .395 | .493 | .618 | −0.1 EM / −0.5 R@5 (within noise) | 96939 (2026-06-18) |
+
+- **RRF helps** (removing it drops EM and R@5) → keep as a component.
+- **MMR is neutral at 1000** (.395 vs .396) → NOT a contributing component; downgraded to a
+  parenthetical in the method (§3.4) and retained only as a default. (Single-round MMR-off was
+  better, .548 vs .506 R@5, but the effect washes out across rounds.)
+
 ## Files
-- `bridge_composition.py` — composition (5-category) + figure.
+- `bridge_composition.py` / `bridge_composition_2wiki.py` — composition (5-category) + figure.
 - `winloss_decomposition.py` — win/loss + figure.
+- `wincase_atomic.py` / `wincase_atomic_2wiki.py` — why ITER loses, per win case (A/B/C/D).
+- `failure_breakdown_2wiki.py` — ITER-fail vs BRGD-fail breakdown (Table in §5.4).
 - `contextual_llm_judge.py` — LLM-judge validation of contextual evidence/distractor.

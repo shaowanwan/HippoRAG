@@ -125,3 +125,17 @@ Full-corpus (11656 passages), QA top-5
 - `outputs/musique_ner_pipeline_eval/global_ner_index.pkl` — Base NER index (MiniLM)
 - `outputs/musique_ner_cross_sentence_eval/cross_sentence_cache_augmented_hub_index.pkl` — Hub augmented index
 - Server: same files at `/data/s4303873/HippoRAG/outputs/`
+
+## Component Ablations (2026-06-18, MuSiQue 1000, NER MiniLM)
+
+Canonical reference = PID 41732 (EM .396 / R@5 .623, MMR on, RRF on).
+
+| Ablation | EM | F1 | R@5 | run / notes |
+|---|---|---|---|---|
+| canonical (MMR on, RRF on) | .396 | — | .623 | 41732 |
+| − RRF (HISTORY_WEIGHT=0) | .370 | — | .582 | PID 93436; RRF **helps** (vs with-RRF 25208 .384/.610) |
+| − MMR (mmr_lambda=1.0) | .395 | .493 | .618 | PID 96939; **neutral** at 1000 (vs .396/.623) |
+
+- RRF is a contributing component (removing it hurts).
+- MMR has no effect at 1000 → downgraded to a parenthetical in Method §3.4, kept only as default.
+  (Single-round MMR-off was better .548 vs .506 R@5, but washes out across rounds.)
