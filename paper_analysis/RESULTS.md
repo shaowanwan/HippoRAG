@@ -89,3 +89,20 @@ Canonical reference = 41732 (EM .396 / R@5 .623, MMR on, RRF on).
 - `wincase_atomic.py` / `wincase_atomic_2wiki.py` — why ITER loses, per win case (A/B/C/D).
 - `failure_breakdown_2wiki.py` — ITER-fail vs BRGD-fail breakdown (Table in §5.4).
 - `contextual_llm_judge.py` — LLM-judge validation of contextual evidence/distractor.
+
+## 5. Echo / cross-round repetition (MuSiQue 1000, BRGD vs NER+ITER)
+Cross-round similarity of consecutive `reasoning_traces` (actual logged text, no embedding model,
+no reconstruction). ITER-RETGEN repeats near-verbatim; BRGD turns over each round.
+
+| metric (consecutive rounds) | BRGD | NER+ITER |
+|---|---|---|
+| Jaccard unigram | 0.363 | 0.496 |
+| Jaccard bigram | 0.143 | 0.325 |
+| ROUGE-L | 0.297 | 0.500 |
+| difflib sequence-ratio | 0.110 | 0.385 |
+| embedding cosine (MiniLM) | 0.849 | 0.873 |
+
+- Phrase/sequence metrics show the gap (ITER 1.7–3.5× more repetitive); unigram understates it.
+- Embedding similarity is comparable (both stay on the question topic) → the echo is *lexical/verbatim*, not semantic.
+- NER+ITER per-round seeds were never logged (round_diagnostics empty in all iterretgen runs);
+  seed-level numbers (0.72 cross-round overlap) are from a `query_ner` reconstruction (proxy) — use text metrics above instead.
