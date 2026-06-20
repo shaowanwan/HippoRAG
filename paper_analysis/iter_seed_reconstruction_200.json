@@ -1,0 +1,6133 @@
+{
+ "note": "iter_rounds are RECONSTRUCTED via query_ner(question+generation), NOT ITER actual logged seeds (those were never saved). 200-sample.",
+ "data": [
+  {
+   "idx": 0,
+   "question": "When was the person who Messi's goals in Copa del Rey compared to get signed by Barcelona?",
+   "brgd_rounds": [
+    [
+     "diego maradona",
+     "1982",
+     "copa del rey semi-final",
+     "gatafe",
+     "goal of the century"
+    ]
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Diego Maradona",
+     "Barcelona"
+    ],
+    [
+     "Diego Maradona",
+     "Barcelona"
+    ],
+    [
+     "Diego Maradona",
+     "Barcelona"
+    ]
+   ]
+  },
+  {
+   "idx": 1,
+   "question": "What month did the Tripartite discussions begin between Britain, France, and the country where, despite being headquartered in the nation called the nobilities commonwealth, the top-ranking Warsaw Pact operatives originated?",
+   "brgd_rounds": [
+    [
+     "poland",
+     "warsaw pact",
+     "polish\u2013lithuanian commonwealth",
+     "tripartite discussions"
+    ],
+    [
+     "anglo-franco-soviet negotiations",
+     "1939",
+     "indirect aggression"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Tripartite discussions",
+     "Soviet Union"
+    ],
+    [
+     "Tripartite discussions",
+     "Warsaw Pact"
+    ],
+    [
+     "Tripartite discussions",
+     "Soviet Union"
+    ]
+   ]
+  },
+  {
+   "idx": 2,
+   "question": "What county is Erik Hort's birthplace a part of?",
+   "brgd_rounds": [
+    [
+     "montebello",
+     "new york"
+    ],
+    [
+     "montebello",
+     "rockland county",
+     "ramapo"
+    ]
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Erik Hort",
+     "Montebello"
+    ],
+    [
+     "Erik Hort",
+     "Montebello"
+    ],
+    [
+     "Erik Hort",
+     "Montebello, New York"
+    ]
+   ]
+  },
+  {
+   "idx": 3,
+   "question": "What year did the publisher of Labyrinth end?",
+   "brgd_rounds": [
+    [
+     "acornsoft"
+    ],
+    [
+     "acornsoft",
+     "bbc micro",
+     "1984"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Labyrinth",
+     "Acornsoft"
+    ],
+    [
+     "Labyrinth",
+     "Acornsoft"
+    ],
+    [
+     "Labyrinth",
+     "Acornsoft"
+    ]
+   ]
+  },
+  {
+   "idx": 4,
+   "question": "When was Lady Godiva's birthplace abolished?",
+   "brgd_rounds": [
+    [
+     "coventry",
+     "dissolution of the lesser monasteries",
+     "henry viii",
+     "leofric",
+     "croyland abbey"
+    ],
+    [
+     "coventry abbey",
+     "dissolution of the lesser monasteries",
+     "dissolution of the greater monasteries",
+     "leofric",
+     "english reformation"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Lady Godiva",
+     "birthplace"
+    ],
+    [
+     "Lady Godiva",
+     "birthplace"
+    ],
+    [
+     "Lady Godiva",
+     "birthplace"
+    ]
+   ]
+  },
+  {
+   "idx": 5,
+   "question": "When was the region immediately north of the region where Israel is located and the location of the Battle of Qurah and Umm al Maradim created?",
+   "brgd_rounds": [
+    [
+     "kuwait",
+     "lebanon",
+     "qaruh island",
+     "umm al maradim",
+     "gulf war"
+    ],
+    [
+     "kuwait",
+     "lebanon",
+     "qurah",
+     "umm al maradim"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Lebanon",
+     "Kuwait"
+    ],
+    [
+     "Lebanon",
+     "Kuwait"
+    ],
+    [
+     "Israel",
+     "Battle of Qurah and Umm al Maradim"
+    ]
+   ]
+  },
+  {
+   "idx": 6,
+   "question": "Where does the body of water by the city where the Southeast Library designer died empty into the Gulf of Mexico?",
+   "brgd_rounds": [
+    [
+     "southeast library",
+     "mayor of ocala",
+     "salt springs",
+     "florida",
+     "gulf of mexico"
+    ],
+    [
+     "ralph rapson",
+     "salt springs",
+     "ocklawaha river",
+     "st. johns river",
+     "gulf-coastal city"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Southeast Library",
+     "Gulf of Mexico"
+    ],
+    [
+     "Southeast Library",
+     "Maya Lin"
+    ],
+    [
+     "Southeast Library",
+     "designer"
+    ]
+   ]
+  },
+  {
+   "idx": 7,
+   "question": "When did the explorer reach the city where the headquarters of the only group larger than Vilaiyaadu Mankatha's record label is located?",
+   "brgd_rounds": [
+    [
+     "sony music entertainment",
+     "francisco de orellana",
+     "guayaquil"
+    ],
+    [
+     "universal music group",
+     "new york city",
+     "henry hudson"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Francisco de Orellana",
+     "Universal Music Group"
+    ],
+    [
+     "Vilaiyaadu Mankatha",
+     "record label"
+    ],
+    [
+     "Vilaiyaadu Mankatha",
+     "record label"
+    ]
+   ]
+  },
+  {
+   "idx": 8,
+   "question": "When was the start of the battle of the birthplace of the performer of III?",
+   "brgd_rounds": [
+    [
+     "greek iii army corps",
+     "iii corps",
+     "kor\u00e7\u00eb",
+     "metz",
+     "uhud"
+    ],
+    [
+     "greek iii army corps",
+     "kor\u00e7a",
+     "georgios tsolakoglou"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "III Corps",
+     "Battle of Korytsa"
+    ],
+    [
+     "Stanton Moore",
+     "Battle of New Orleans"
+    ],
+    [
+     "III",
+     "performer"
+    ]
+   ]
+  },
+  {
+   "idx": 9,
+   "question": "What is the Till dom ensamma performer's birth date?",
+   "brgd_rounds": [
+    [
+     "mauro scocco"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Till dom ensamma",
+     "Mauro Scocco"
+    ],
+    [
+     "Mauro Scocco",
+     "Till dom ensamma"
+    ],
+    [
+     "Till dom ensamma",
+     "Mauro Scocco"
+    ]
+   ]
+  },
+  {
+   "idx": 10,
+   "question": "How many episodes are in season 5 of the series with The Bag or the Bat?",
+   "brgd_rounds": [
+    [
+     "ray donovan"
+    ],
+    [
+     "ray donovan",
+     "season 5"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "The Bag or the Bat",
+     "Ray Donovan"
+    ],
+    [
+     "The Bag or the Bat",
+     "Ray Donovan"
+    ],
+    [
+     "The Bag or the Bat",
+     "Ray Donovan"
+    ]
+   ]
+  },
+  {
+   "idx": 11,
+   "question": "How were the people from whom new coins were a proclamation of independence by the Somali Muslim Ajuran Empire expelled from the country between Thailand and A Lim's country?",
+   "brgd_rounds": [
+    [
+     "ajuran empire",
+     "portuguese",
+     "ottomans",
+     "indian ocean",
+     "coinage"
+    ],
+    [
+     "ajuran empire",
+     "portuguese",
+     "ottomans",
+     "indian ocean",
+     "coinage"
+    ]
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Somali Muslim Ajuran Empire",
+     "Portuguese"
+    ],
+    [
+     "Somali Muslim Ajuran Empire",
+     "Portuguese"
+    ],
+    [
+     "Somali Muslim Ajuran Empire",
+     "Portuguese"
+    ]
+   ]
+  },
+  {
+   "idx": 12,
+   "question": "What is the birthplace of the person after whom S\u00e3o Jos\u00e9 dos Campos was named?",
+   "brgd_rounds": [
+    [
+     "saint joseph",
+     "bethlehem"
+    ],
+    [
+     "saint joseph",
+     "bethlehem",
+     "husband of mary",
+     "biblical figure"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "S\u00e3o Jos\u00e9 dos Campos",
+     "Saint Joseph"
+    ],
+    [
+     "S\u00e3o Jos\u00e9 dos Campos",
+     "Saint Joseph"
+    ],
+    [
+     "S\u00e3o Jos\u00e9 dos Campos",
+     "Saint Joseph"
+    ]
+   ]
+  },
+  {
+   "idx": 13,
+   "question": "How many times did plague occur in the place where Crucifixion's creator died?",
+   "brgd_rounds": [
+    [
+     "black death",
+     "venice",
+     "london",
+     "paris",
+     "amsterdam"
+    ],
+    [
+     "titian",
+     "venice",
+     "hieronymus bosch",
+     "'crucifixion of st julia'",
+     "palazzo ducale"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Crucifixion",
+     "creator"
+    ],
+    [
+     "Crucifixion",
+     "creator"
+    ],
+    [
+     "Crucifixion",
+     "creator"
+    ]
+   ]
+  },
+  {
+   "idx": 14,
+   "question": "What year did the Governor of the city where the basilica named after the same saint as the one that Mantua Cathedral is dedicated to die?",
+   "brgd_rounds": [
+    [
+     "san pietro in ciel d'oro",
+     "pavia",
+     "saint peter",
+     "mantua cathedral"
+    ],
+    [
+     "pavia",
+     "san pietro in ciel d'oro",
+     "saint peter"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Mantua Cathedral",
+     "San Pietro in Montorio"
+    ],
+    [
+     "Mantua Cathedral",
+     "St. Peter's Basilica"
+    ],
+    [
+     "Mantua Cathedral",
+     "St. Peter's Basilica"
+    ]
+   ]
+  },
+  {
+   "idx": 15,
+   "question": "What company succeeded the owner of Empire Sports Network?",
+   "brgd_rounds": [
+    [
+     "adelphia communications corporation",
+     "bankruptcy",
+     "regional sports network"
+    ],
+    [
+     "adelphia communications corporation",
+     "empire sports network",
+     "bankruptcy",
+     "2005"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Empire Sports Network",
+     "Adelphia Communications Corporation"
+    ],
+    [
+     "Empire Sports Network",
+     "Adelphia Communications Corporation"
+    ],
+    [
+     "Empire Sports Network",
+     "Adelphia Communications Corporation"
+    ]
+   ]
+  },
+  {
+   "idx": 16,
+   "question": "When was the Palau de la Generalitat constructed in the city where Martin from the region where Perdiguera is located died?",
+   "brgd_rounds": [
+    [
+     "aragon",
+     "barcelona",
+     "martin i of aragon",
+     "crown of aragon"
+    ],
+    [
+     "martin the humane",
+     "barcelona",
+     "crown of aragon",
+     "15th century"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Palau de la Generalitat",
+     "Barcelona"
+    ],
+    [
+     "Palau de la Generalitat",
+     "Barcelona"
+    ],
+    [
+     "Palau de la Generalitat",
+     "Barcelona"
+    ]
+   ]
+  },
+  {
+   "idx": 17,
+   "question": "Who married the actor from Terminator?",
+   "brgd_rounds": [
+    [
+     "arnold schwarzenegger"
+    ],
+    [
+     "maria shriver"
+    ]
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Arnold Schwarzenegger",
+     "Terminator"
+    ],
+    [
+     "Arnold Schwarzenegger",
+     "Maria Shriver"
+    ],
+    [
+     "Arnold Schwarzenegger",
+     "Maria Shriver"
+    ]
+   ]
+  },
+  {
+   "idx": 18,
+   "question": "Who was in charge of the place where Castricum is located?",
+   "brgd_rounds": [
+    [
+     "north holland",
+     "netherlands",
+     "county of holland"
+    ],
+    [
+     "county of holland",
+     "burgundian netherlands",
+     "habsburg netherlands",
+     "dutch republic",
+     "haarlem"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Castricum",
+     "Netherlands"
+    ],
+    [
+     "Castricum",
+     "North Holland"
+    ],
+    [
+     "Castricum",
+     "North Holland"
+    ]
+   ]
+  },
+  {
+   "idx": 19,
+   "question": "Who is the mascot of the university related to Randy Conrads?",
+   "brgd_rounds": [
+    [
+     "oregon state university",
+     "benny beaver"
+    ]
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Randy Conrads",
+     "Oregon State University"
+    ],
+    [
+     "Randy Conrads",
+     "Oregon State University"
+    ],
+    [
+     "Randy Conrads",
+     "Oregon State University"
+    ]
+   ]
+  },
+  {
+   "idx": 20,
+   "question": "What does seal stand for in the U.S. military branch that operates destroyers, as well as the USS Edsall?",
+   "brgd_rounds": [
+    [
+     "navy seals",
+     "naval special warfare command",
+     "sea air and land"
+    ]
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "SEAL",
+     "U.S. Navy"
+    ],
+    [
+     "SEAL",
+     "U.S. Navy"
+    ],
+    [
+     "SEAL",
+     "United States Navy"
+    ]
+   ]
+  },
+  {
+   "idx": 21,
+   "question": "Who is the child of Chiang Hsiao-wen's father?",
+   "brgd_rounds": [
+    [
+     "chiang ching-kuo",
+     "winston chang",
+     "john chiang",
+     "hsiao-yung"
+    ]
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Chiang Hsiao-wen",
+     "Chiang Ching-kuo"
+    ],
+    [
+     "Chiang Hsiao-wen",
+     "Chiang Ching-kuo"
+    ],
+    [
+     "Chiang Hsiao-wen",
+     "Chiang Ching-kuo"
+    ]
+   ]
+  },
+  {
+   "idx": 22,
+   "question": "Where was the person who wrote about the rioting being a dividing factor in Birmingham educated?",
+   "brgd_rounds": [
+    [
+     "james watt"
+    ],
+    [
+     "james watt",
+     "king edward's school",
+     "trinity college",
+     "cambridge"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "James Watt",
+     "Birmingham"
+    ],
+    [
+     "James Watt",
+     "Birmingham"
+    ],
+    [
+     "James Watt",
+     "Birmingham"
+    ]
+   ]
+  },
+  {
+   "idx": 23,
+   "question": "Whose sister played Susie in miracle on 34th street?",
+   "brgd_rounds": [
+    [
+     "natalie wood",
+     "lana wood"
+    ]
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Lana Wood",
+     "Natalie Wood"
+    ],
+    [
+     "Natalie Wood",
+     "Lana Wood"
+    ],
+    [
+     "Lana Wood",
+     "Natalie Wood"
+    ]
+   ]
+  },
+  {
+   "idx": 24,
+   "question": "Who is the child of the Italian navigator who explored the eastern coast of the continent C\u00e9sar Gaytan was born in for the English?",
+   "brgd_rounds": [
+    [
+     "john cabot",
+     "sebastian cabot",
+     "newfoundland",
+     "north america"
+    ]
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "C\u00e9sar Gaytan",
+     "John Cabot"
+    ],
+    [
+     "C\u00e9sar Gaytan",
+     "John Cabot"
+    ],
+    [
+     "John Cabot",
+     "Sebastian Cabot"
+    ]
+   ]
+  },
+  {
+   "idx": 25,
+   "question": "Who is the spouse of Young Man Luther's author?",
+   "brgd_rounds": [
+    [
+     "erik erikson",
+     "joan erikson"
+    ],
+    [
+     "joan erikson",
+     "erik erikson"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Young Man Luther",
+     "Erik Erikson"
+    ],
+    [
+     "Young Man Luther",
+     "Erik Erikson"
+    ],
+    [
+     "Young Man Luther",
+     "Erik Erikson"
+    ]
+   ]
+  },
+  {
+   "idx": 26,
+   "question": "How many times did the plague occur in the city where the painter of The Bacchanal of the Andrians died?",
+   "brgd_rounds": [
+    [
+     "titian"
+    ],
+    [
+     "venice",
+     "titian"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Titian",
+     "Venice"
+    ],
+    [
+     "Titian",
+     "Venice"
+    ],
+    [
+     "Titian",
+     "Venice"
+    ]
+   ]
+  },
+  {
+   "idx": 27,
+   "question": "In what year was the group who performed Attics To Eden formed?",
+   "brgd_rounds": [
+    [
+     "madina lake"
+    ],
+    [
+     "madina lake"
+    ]
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Madina Lake",
+     "Attics to Eden"
+    ],
+    [
+     "Attics To Eden",
+     "Madina Lake"
+    ],
+    [
+     "Madina Lake",
+     "Attics to Eden"
+    ]
+   ]
+  },
+  {
+   "idx": 28,
+   "question": "Where did the arguer that the country Directive 10/2 called for actions against had become an imperialist power declare he would intervene in the Korean conflict?",
+   "brgd_rounds": [
+    [
+     "truman",
+     "mao",
+     "stalin",
+     "kim il-sung",
+     "nsc-68"
+    ],
+    [
+     "mao zedong",
+     "nsc-10/2",
+     "beijing",
+     "ccp central committee",
+     "korean war intervention"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Directive 10/2",
+     "Korean conflict"
+    ],
+    [
+     "Directive 10/2",
+     "Korean conflict"
+    ],
+    [
+     "Directive 10/2",
+     "USSR"
+    ]
+   ]
+  },
+  {
+   "idx": 29,
+   "question": "When did military instruction start at the place where Larry Alcala was educated?",
+   "brgd_rounds": [
+    [
+     "aquinas college",
+     "salter point",
+     "jerry dolan",
+     "south perth",
+     "mick cronin"
+    ],
+    [
+     "university of the philippines",
+     "up"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Larry Alcala",
+     "educational institution"
+    ],
+    [
+     "Larry Alcala",
+     "institution"
+    ],
+    [
+     "Larry Alcala",
+     "educational institution"
+    ]
+   ]
+  },
+  {
+   "idx": 30,
+   "question": "When did the city where Greenwood Laboratory School is located become capitol of the state where the screenwriter of The Poor Boob was born?",
+   "brgd_rounds": [
+    [
+     "springfield",
+     "missouri",
+     "the poor boob"
+    ],
+    [
+     "springfield illinois",
+     "illinois",
+     "margaret mayo",
+     "brownsville illinois"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Greenwood Laboratory School",
+     "The Poor Boob"
+    ],
+    [
+     "Greenwood Laboratory School",
+     "The Poor Boob"
+    ],
+    [
+     "Greenwood Laboratory School",
+     "The Poor Boob"
+    ]
+   ]
+  },
+  {
+   "idx": 31,
+   "question": "Who is played by the director of The Good Shepherd in The Godfather?",
+   "brgd_rounds": [
+    [
+     "robert de niro",
+     "the godfather",
+     "the good shepherd"
+    ],
+    [
+     "robert de niro",
+     "the godfather",
+     "the godfather part ii",
+     "marlon brando",
+     "vito corleone"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "The Good Shepherd",
+     "The Godfather"
+    ],
+    [
+     "The Good Shepherd",
+     "The Godfather"
+    ],
+    [
+     "The Good Shepherd",
+     "The Godfather"
+    ]
+   ]
+  },
+  {
+   "idx": 32,
+   "question": "How long are the council terms of the city that shares a county with Helvetia?",
+   "brgd_rounds": [
+    [
+     "pima county",
+     "arizona",
+     "tucson"
+    ],
+    [
+     "tucson",
+     "pima county",
+     "tucson city council"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Helvetia",
+     "Pima County"
+    ],
+    [
+     "Helvetia",
+     "Tucson"
+    ],
+    [
+     "Helvetia",
+     "Tucson"
+    ]
+   ]
+  },
+  {
+   "idx": 33,
+   "question": "When was the region immediately north of the region that prevailed with the disgrace of Near East and the terrain feature on which shamal is located created?",
+   "brgd_rounds": [
+    [
+     "iraq",
+     "syria",
+     "jordan",
+     "persian gulf",
+     "ottoman empire"
+    ],
+    [
+     "ottoman empire",
+     "sykes-picot agreement",
+     "arabian desert",
+     "mesopotamian plain",
+     "syrian desert"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Near East",
+     "shamal"
+    ],
+    [
+     "Middle East",
+     "shamal"
+    ],
+    [
+     "Near East",
+     "shamal"
+    ]
+   ]
+  },
+  {
+   "idx": 34,
+   "question": "How did did the people fare during the reign of the abolisher of sati partha in India?",
+   "brgd_rounds": [
+    [
+     "ram mohan roy",
+     "william carey",
+     "bengal",
+     "1829 sati regulation",
+     "british east india company"
+    ],
+    [
+     "ram mohan roy",
+     "permanent settlement",
+     "bengal presidency",
+     "1829 sati regulation",
+     "warren hastings"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "sati",
+     "Lord William Bentinck"
+    ],
+    [
+     "sati",
+     "Lord William Bentinck"
+    ],
+    [
+     "sati",
+     "Lord William Bentinck"
+    ]
+   ]
+  },
+  {
+   "idx": 35,
+   "question": "What is the position of the 1st governor general of India?",
+   "brgd_rounds": [
+    [
+     "warren hastings",
+     "governor-general of india",
+     "20 october 1774"
+    ]
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Warren Hastings",
+     "Governor-General of India"
+    ],
+    [
+     "Warren Hastings",
+     "Governor-General of India"
+    ],
+    [
+     "Warren Hastings",
+     "Governor-General of India"
+    ]
+   ]
+  },
+  {
+   "idx": 36,
+   "question": "Who is the child of the president who suffered a major defeat when the body which approves members of the American cabinet refused to ratify the Versailles treaty?",
+   "brgd_rounds": [
+    [
+     "woodrow wilson",
+     "jessie woodrow wilson sayre",
+     "u.s. senate",
+     "henry cabot lodge"
+    ]
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Woodrow Wilson",
+     "Jessie Woodrow Wilson Sayre"
+    ],
+    [
+     "Woodrow Wilson",
+     "Jessie Woodrow Wilson Sayre"
+    ],
+    [
+     "Woodrow Wilson",
+     "Jessie Woodrow Wilson Sayre"
+    ]
+   ]
+  },
+  {
+   "idx": 37,
+   "question": "What does dell call the feature letting the interface replacing FireWire in later iterations of the iPod drives to remain powered when the computer is off?",
+   "brgd_rounds": [
+    [
+     "powershare",
+     "usb sleep-and-charge",
+     "power-off usb"
+    ]
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Dell",
+     "PowerShare"
+    ],
+    [
+     "Dell",
+     "PowerShare"
+    ],
+    [
+     "Dell",
+     "PowerShare"
+    ]
+   ]
+  },
+  {
+   "idx": 38,
+   "question": "Who wrote Turn Me On by the singer of Come Away with Me?",
+   "brgd_rounds": [
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Turn Me On",
+     "Come Away with Me"
+    ],
+    [
+     "Turn Me On",
+     "Come Away with Me"
+    ],
+    [
+     "Norah Jones",
+     "John D. Loudermilk"
+    ]
+   ]
+  },
+  {
+   "idx": 39,
+   "question": "Who was second pick in the 1999 draft of the league that has a competition where they give out the MLB MVP award after it?",
+   "brgd_rounds": [
+    [
+     "mlb draft",
+     "1999 mlb draft",
+     "mlb mvp"
+    ],
+    [],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "1999 MLB Draft",
+     "MLB MVP award"
+    ],
+    [
+     "1999 draft",
+     "MLB"
+    ],
+    [
+     "1999 draft",
+     "MLB MVP award"
+    ]
+   ]
+  },
+  {
+   "idx": 40,
+   "question": "The Commission of Truth and Friendship established governments for Bustami's birth country and a second country that had who as president after declaring independence?",
+   "brgd_rounds": [
+    [
+     "indonesia",
+     "east timor",
+     "timor-leste",
+     "susilo bambang yudhoyono",
+     "xanana gusm\u00e3o"
+    ],
+    [
+     "timor-leste",
+     "independence 2002",
+     "francisco guterres",
+     "susilo bambang yudhoyono"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Bustami",
+     "Indonesia\u2013Timor Leste Commission on Truth and Friendship"
+    ],
+    [
+     "Indonesia\u2013Timor Leste Commission on Truth and Friendship",
+     "Timor-Leste"
+    ],
+    [
+     "Commission of Truth and Friendship",
+     "East Timor"
+    ]
+   ]
+  },
+  {
+   "idx": 41,
+   "question": "Where is the country with ISO code ISO 3166-2:CV located?",
+   "brgd_rounds": [
+    [
+     "cabo verde",
+     "cape verde",
+     "central atlantic ocean",
+     "northwest africa",
+     "cape verde peninsula"
+    ]
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Cabo Verde",
+     "central Atlantic Ocean"
+    ],
+    [
+     "ISO 3166-2:CV",
+     "Cape Verde"
+    ],
+    [
+     "ISO 3166-2:CV",
+     "Cape Verde"
+    ]
+   ]
+  },
+  {
+   "idx": 42,
+   "question": "What was the form of the language Auctor is in, used in the era of the Frankish king who created the Holy Roman Empire, later known as?",
+   "brgd_rounds": [
+    [
+     "carolingian renaissance",
+     "medieval latin",
+     "charlemagne",
+     "carolingian minuscule",
+     "alcuin"
+    ],
+    [
+     "liber auctoritatum",
+     "florilegium",
+     "carolingian scholars",
+     "alculin",
+     "grammatical terminology"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Charlemagne",
+     "Medieval Latin"
+    ],
+    [
+     "Charlemagne",
+     "Medieval Latin"
+    ],
+    [
+     "Auctor",
+     "Charlemagne"
+    ]
+   ]
+  },
+  {
+   "idx": 43,
+   "question": "When did the political party that favored harsh punishment of southern states after the Civil War, gain control of the House?",
+   "brgd_rounds": [
+    [
+     "radical republicans",
+     "reconstruction",
+     "40th congress",
+     "1866 elections"
+    ],
+    [
+     "radical republicans",
+     "reconstruction",
+     "40th congress",
+     "1866 elections",
+     "reconstruction acts"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Radical Republicans",
+     "House"
+    ],
+    [
+     "Radical Republicans",
+     "House"
+    ],
+    [
+     "Republican Party",
+     "House"
+    ]
+   ]
+  },
+  {
+   "idx": 44,
+   "question": "When did the person chosen to be president of the confederacy end his fight in the Mexican-American war?",
+   "brgd_rounds": [
+    [
+     "jefferson davis"
+    ],
+    [
+     "jefferson davis",
+     "mexican-american war",
+     "1846\u20131848"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Jefferson Davis",
+     "Mexican-American War"
+    ],
+    [
+     "Jefferson Davis",
+     "Mexican-American War"
+    ],
+    [
+     "Jefferson Davis",
+     "Mexican-American War"
+    ]
+   ]
+  },
+  {
+   "idx": 45,
+   "question": "What city is the star of Sous les pieds des femmes from?",
+   "brgd_rounds": [
+    [
+     "claudia cardinale"
+    ],
+    [
+     "la goulette",
+     "tunis",
+     "claudia cardinale"
+    ]
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Sous les pieds des femmes",
+     "Claudia Cardinale"
+    ],
+    [
+     "Claudia Cardinale",
+     "Sous les pieds des femmes"
+    ],
+    [
+     "Sous les pieds des femmes",
+     "Claudia Cardinale"
+    ]
+   ]
+  },
+  {
+   "idx": 46,
+   "question": "what is meaning of the word that is a majority religion of the area that became India when the country origin of Mizraab was created in Arabic dictionary?",
+   "brgd_rounds": [
+    [
+     "al-hind",
+     "hind\u012b",
+     "arabic dictionary",
+     "lis\u0101n al-\u02bfarab",
+     "hinduism"
+    ],
+    [
+     "lis\u0101n al-\u02bfarab",
+     "hind\u012b",
+     "al-hind",
+     "hind\u0101niyya",
+     "classical arabic lexicography"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Mizraab",
+     "Pakistan"
+    ],
+    [
+     "Mizraab",
+     "Pakistan"
+    ],
+    [
+     "Mizraab",
+     "India"
+    ]
+   ]
+  },
+  {
+   "idx": 47,
+   "question": "Who stars in the video \"One Last Time\" by the performer of Baby I?",
+   "brgd_rounds": [
+    [
+     "ariana grande",
+     "matt bennett",
+     "elizabeth gillies",
+     "max landis"
+    ],
+    [
+     "matt bennett",
+     "elizabeth gillies"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Britney Spears",
+     "One Last Time"
+    ],
+    [
+     "Ariana Grande",
+     "Matt Bennett"
+    ],
+    [
+     "Ariana Grande",
+     "Matt Bennett"
+    ]
+   ]
+  },
+  {
+   "idx": 48,
+   "question": "When did the majority party in the House of Representatives gain control of the body which approves members of the Cabinet?",
+   "brgd_rounds": [
+    [
+     "u.s. senate",
+     "cabinet confirmation",
+     "nancy pelosi",
+     "2006 elections",
+     "reconstruction era"
+    ],
+    [
+     "114th congress",
+     "2014 elections",
+     "u.s. senate",
+     "republican party",
+     "cabinet confirmation"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "House of Representatives",
+     "Cabinet"
+    ],
+    [
+     "House of Representatives",
+     "Senate"
+    ],
+    [
+     "House of Representatives",
+     "U.S. Senate"
+    ]
+   ]
+  },
+  {
+   "idx": 49,
+   "question": "How many ethnic minorities were looked at differently in the city where the headquarters of the only group larger than L\u00e5nga n\u00e4tter's record label is located?",
+   "brgd_rounds": [
+    [
+     "l\u00e5nga n\u00e4tter",
+     "record label",
+     "ethnic minorities",
+     "headquarters",
+     "differently"
+    ],
+    [
+     "sony music entertainment",
+     "new york city",
+     "universal music group",
+     "nashville",
+     "stockholm"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "L\u00e5nga n\u00e4tter",
+     "record label"
+    ],
+    [
+     "L\u00e5nga n\u00e4tter",
+     "record label"
+    ],
+    [
+     "L\u00e5nga n\u00e4tter",
+     "record label"
+    ]
+   ]
+  },
+  {
+   "idx": 50,
+   "question": "When did the country the top-ranking Warsaw Pact operatives came from, despite it being headquartered in the country where A Generation is set, agree to a unified Germany inside NATO?",
+   "brgd_rounds": [
+    [
+     "soviet union",
+     "two plus four talks",
+     "treaty on the final settlement with respect to germany",
+     "1990",
+     "german reunification"
+    ],
+    [
+     "treaty on the final settlement with respect to germany",
+     "two plus four negotiations",
+     "soviet union"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Soviet Union",
+     "A Generation"
+    ],
+    [
+     "Soviet Union",
+     "Germany"
+    ],
+    [
+     "Soviet Union",
+     "Two Plus Four Agreement"
+    ]
+   ]
+  },
+  {
+   "idx": 51,
+   "question": "Who won the Indy Car Race in the largest populated city of the state where the performer of Mingus Three is from?",
+   "brgd_rounds": [
+    [
+     "charles mingus",
+     "indianapolis motor speedway",
+     "indianapolis 500",
+     "will power",
+     "indy racing league"
+    ],
+    [
+     "charles mingus",
+     "arizona",
+     "phoenix"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Mingus Three",
+     "Indy Car Race"
+    ],
+    [
+     "Charles Mingus",
+     "Arizona"
+    ],
+    [
+     "Charles Mingus",
+     "Los Angeles"
+    ]
+   ]
+  },
+  {
+   "idx": 52,
+   "question": "Who did the person who married their half sister in the bible marry after the death of sarah?",
+   "brgd_rounds": [
+    [
+     "abraham",
+     "keturah"
+    ]
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Abraham",
+     "Keturah"
+    ],
+    [
+     "Abraham",
+     "Sarah"
+    ],
+    [
+     "Abraham",
+     "Sarah"
+    ]
+   ]
+  },
+  {
+   "idx": 53,
+   "question": "What is the average salary of a working person with the same nationality as the producer of The Wild Women of Chastity Gulch?",
+   "brgd_rounds": [
+    [
+     "aaron spelling",
+     "united states",
+     "american"
+    ],
+    [
+     "aaron spelling",
+     "united states",
+     "full-time worker",
+     "bureau of labor statistics",
+     "u.s. census bureau"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "The Wild Women of Chastity Gulch",
+     "Aaron Spelling"
+    ],
+    [
+     "The Wild Women of Chastity Gulch",
+     "producer"
+    ],
+    [
+     "The Wild Women of Chastity Gulch",
+     "Aaron Spelling"
+    ]
+   ]
+  },
+  {
+   "idx": 54,
+   "question": "Who was Beyonce's husband talking about in the the song Cry?",
+   "brgd_rounds": [
+    [
+     "jay-z",
+     "cry (beyonc\u00e9 song)",
+     "4 (album)"
+    ],
+    [
+     "4",
+     "jay-z",
+     "cry",
+     "beyonc\u00e9"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Beyonc\u00e9",
+     "song Cry"
+    ],
+    [
+     "Beyonc\u00e9",
+     "Jay-Z"
+    ],
+    [
+     "Beyonc\u00e9",
+     "song Cry"
+    ]
+   ]
+  },
+  {
+   "idx": 55,
+   "question": "When was the region immediately north of the region where Israel is located and the site of the most growth in desalination for agricultural use established?",
+   "brgd_rounds": [
+    [
+     "lebanon",
+     "agricultural desalination growth",
+     "persian gulf",
+     "california",
+     "singapore"
+    ],
+    [
+     "persian gulf",
+     "singapore",
+     "california",
+     "lebanon"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Israel",
+     "Lebanon"
+    ],
+    [
+     "Lebanon",
+     "desalination for agricultural use"
+    ],
+    [
+     "Lebanon",
+     "desalination for agricultural use"
+    ]
+   ]
+  },
+  {
+   "idx": 56,
+   "question": "An Indy car race was held in the capital of the state where the performer of Mingus Plays Piano was born. Who won the race?",
+   "brgd_rounds": [
+    [
+     "charles mingus"
+    ],
+    [
+     "phoenix",
+     "arizona",
+     "indycar",
+     "phoenix grand prix"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Charles Mingus",
+     "Phoenix"
+    ],
+    [
+     "Charles Mingus",
+     "Phoenix"
+    ],
+    [
+     "Charles Mingus",
+     "Phoenix"
+    ]
+   ]
+  },
+  {
+   "idx": 57,
+   "question": "What is the name of the famous bridge in the birth city of the composer of Scanderbeg?",
+   "brgd_rounds": [
+    [
+     "antonio vivaldi",
+     "venice"
+    ],
+    [
+     "antonio vivaldi",
+     "scanderbeg",
+     "venice"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Scanderbeg",
+     "Antonio Vivaldi"
+    ],
+    [
+     "Antonio Vivaldi",
+     "Rialto Bridge"
+    ],
+    [
+     "Scanderbeg",
+     "Antonio Vivaldi"
+    ]
+   ]
+  },
+  {
+   "idx": 58,
+   "question": "Who was the spouse of a leading speaker against slavery and publisher of an antislavery newspaper?",
+   "brgd_rounds": [
+    [
+     "frederick douglass",
+     "the north star",
+     "anna murray douglass",
+     "helen pitts douglass"
+    ],
+    [
+     "anna murray douglass",
+     "the north star",
+     "frederick douglass"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Frederick Douglass",
+     "Helen Pitts Douglass"
+    ],
+    [
+     "Frederick Douglass",
+     "The North Star"
+    ],
+    [
+     "Frederick Douglass",
+     "Helen Pitts Douglass"
+    ]
+   ]
+  },
+  {
+   "idx": 59,
+   "question": "Where is the district that the person who wanted to reform and address John Kodwo Amissah's religion preached a sermon on Marian devotion before his death located?",
+   "brgd_rounds": [
+    [
+     "cape coast",
+     "archbishop of cape coast",
+     "ghana",
+     "marian devotion",
+     "catholic church"
+    ],
+    [
+     "archbishop of cape coast",
+     "successor",
+     "marian devotion",
+     "cape coast",
+     "ghana"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "John Kodwo Amissah",
+     "Portland-Simonds"
+    ],
+    [
+     "John Kodwo Amissah",
+     "Marian devotion"
+    ],
+    [
+     "John Kodwo Amissah",
+     "House of the Virgin Mary"
+    ]
+   ]
+  },
+  {
+   "idx": 60,
+   "question": "What is the capital of the county where Fort Deposit is located?",
+   "brgd_rounds": [
+    [
+     "lowndes county",
+     "hayneville"
+    ]
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Fort Deposit",
+     "Lowndes County"
+    ],
+    [
+     "Fort Deposit",
+     "Lowndes County"
+    ],
+    [
+     "Fort Deposit",
+     "Lowndes County"
+    ]
+   ]
+  },
+  {
+   "idx": 61,
+   "question": "How long had Pfrang Association's headquarters location been the capitol city of the area where Guangling District is located?",
+   "brgd_rounds": [
+    [
+     "nanjing",
+     "jiangsu province",
+     "yangzhou"
+    ],
+    [
+     "nanjing",
+     "jiangsu province",
+     "yangzhou",
+     "pfrang association",
+     "guangling district"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Pfrang Association",
+     "Guangling District"
+    ],
+    [
+     "Pfrang Association",
+     "Guangling District"
+    ],
+    [
+     "Pfrang Association",
+     "Guangling District"
+    ]
+   ]
+  },
+  {
+   "idx": 62,
+   "question": "What was the language Auctor comes from during the era of the man crowned first Holy Roman Emperor later known as?",
+   "brgd_rounds": [
+    [
+     "charlemagne",
+     "carolingian renaissance",
+     "alcuin",
+     "medieval latin",
+     "carolingian empire"
+    ],
+    [
+     "carolingian minuscule",
+     "alculin",
+     "medieval latin",
+     "annales regni francorum",
+     "vita karoli magni"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Charlemagne",
+     "Medieval Latin"
+    ],
+    [
+     "Auctor",
+     "Charlemagne"
+    ],
+    [
+     "Auctor",
+     "Holy Roman Emperor"
+    ]
+   ]
+  },
+  {
+   "idx": 63,
+   "question": "When did the 1979-80 European Cup winner win the FA Cup?",
+   "brgd_rounds": [
+    [
+     "nottingham forest",
+     "john robertson",
+     "hamburg"
+    ],
+    [
+     "nottingham forest",
+     "1898",
+     "1959",
+     "brian clough",
+     "football league cup"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "1979\u201380 European Cup",
+     "FA Cup"
+    ],
+    [
+     "1979\u201380 European Cup",
+     "Nottingham Forest"
+    ],
+    [
+     "Nottingham Forest",
+     "1979\u201380 European Cup"
+    ]
+   ]
+  },
+  {
+   "idx": 64,
+   "question": "Who was a prominent figure at the radio division of the network that created the version of The Biggest Loser set in the country where Seria is?",
+   "brgd_rounds": [
+    [
+     "serbia",
+     "sweden",
+     "sveriges radio",
+     "svt1",
+     "seven network"
+    ],
+    [
+     "sveriges radio",
+     "sweden",
+     "melodifestivalen",
+     "svt1"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Seria",
+     "The Biggest Loser"
+    ],
+    [
+     "The Biggest Loser",
+     "Seria"
+    ],
+    [
+     "Seria",
+     "The Biggest Loser Brunei"
+    ]
+   ]
+  },
+  {
+   "idx": 65,
+   "question": "What was the 2018 population of the Italian city that's underwater?",
+   "brgd_rounds": [
+    [
+     "venice"
+    ]
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Venice",
+     "2018"
+    ],
+    [
+     "Venice",
+     "2018"
+    ],
+    [
+     "Venice",
+     "2018"
+    ]
+   ]
+  },
+  {
+   "idx": 66,
+   "question": "What was the language from which the last name Sylvester originated during the era of the person crowned emperor of the west in 800 CE later known as?",
+   "brgd_rounds": [
+    [
+     "charlemagne",
+     "medieval latin",
+     "carolingian renaissance",
+     "carolingian minuscule"
+    ],
+    [
+     "medieval latin",
+     "carolingian renaissance",
+     "carolingian minuscule"
+    ]
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Sylvester",
+     "Charlemagne"
+    ],
+    [
+     "Sylvester",
+     "Charlemagne"
+    ],
+    [
+     "Sylvester",
+     "Charlemagne"
+    ]
+   ]
+  },
+  {
+   "idx": 67,
+   "question": "Who is the head of the agency that created MYSTIC?",
+   "brgd_rounds": [
+    [
+     "nsa",
+     "edward snowden",
+     "2009"
+    ],
+    [
+     "nsa",
+     "edward snowden",
+     "2009"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "MYSTIC",
+     "National Security Agency"
+    ],
+    [
+     "MYSTIC",
+     "National Security Agency"
+    ],
+    [
+     "MYSTIC",
+     "National Security Agency"
+    ]
+   ]
+  },
+  {
+   "idx": 68,
+   "question": "What was the wettest year of the administrative territorial entity that contains the administrative territorial entity where Drexel Heights is located?",
+   "brgd_rounds": [
+    [
+     "pima county",
+     "arizona"
+    ],
+    [
+     "pima county",
+     "arizona",
+     "university of arizona",
+     "tucson"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Drexel Heights",
+     "Pima County"
+    ],
+    [
+     "Drexel Heights",
+     "Pima County"
+    ],
+    [
+     "Drexel Heights",
+     "Pima County"
+    ]
+   ]
+  },
+  {
+   "idx": 69,
+   "question": "Who won the Indy Car Race in the largest populated city of the state where the performer of Mingus Plays Piano is from?",
+   "brgd_rounds": [
+    [
+     "mingus plays piano",
+     "charles mingus"
+    ],
+    [
+     "charles mingus",
+     "arizona",
+     "phoenix"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Charles Mingus",
+     "California"
+    ],
+    [
+     "Charles Mingus",
+     "Los Angeles"
+    ],
+    [
+     "Charles Mingus",
+     "Phoenix"
+    ]
+   ]
+  },
+  {
+   "idx": 70,
+   "question": "What does the river that Darling Mills Creek turns into flow into?",
+   "brgd_rounds": [
+    [
+     "parramatta river"
+    ],
+    [
+     "parramatta river"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Darling Mills Creek",
+     "Parramatta River"
+    ],
+    [
+     "Darling Mills Creek",
+     "Parramatta River"
+    ],
+    [
+     "Darling Mills Creek",
+     "Parramatta River"
+    ]
+   ]
+  },
+  {
+   "idx": 71,
+   "question": "What administrative territorial entity does Darley Ramon Torres's place of birth located?",
+   "brgd_rounds": [
+    [
+     "pedro leopoldo",
+     "minas gerais"
+    ]
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Darley Ramon Torres",
+     "Pedro Leopoldo"
+    ],
+    [
+     "Darley Ramon Torres",
+     "Pedro Leopoldo"
+    ],
+    [
+     "Darley Ramon Torres",
+     "Pedro Leopoldo"
+    ]
+   ]
+  },
+  {
+   "idx": 72,
+   "question": "Which county shares a border with the county where the most populous city in the state where Washington State Prison can be found is located?",
+   "brgd_rounds": [
+    [
+     "georgia",
+     "washington county",
+     "atlanta",
+     "fulton county"
+    ],
+    [
+     "atlanta",
+     "fulton county",
+     "georgia"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Washington State Prison",
+     "Fulton County"
+    ],
+    [
+     "Washington State Prison",
+     "Fulton County"
+    ],
+    [
+     "Washington State Prison",
+     "Fulton County"
+    ]
+   ]
+  },
+  {
+   "idx": 73,
+   "question": "What is the meaning of the name of the city where the Yongle emperor greeted the person to whom the edict was addressed?",
+   "brgd_rounds": [
+    [
+     "nanjing",
+     "deshin shekpa"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Nanjing",
+     "Yongle Emperor"
+    ],
+    [
+     "Yongle Emperor",
+     "Nanjing"
+    ],
+    [
+     "Yongle Emperor",
+     "Nanjing"
+    ]
+   ]
+  },
+  {
+   "idx": 74,
+   "question": "What is the direction of flow of the body of water by the city where Write This Down was formed?",
+   "brgd_rounds": [
+    [
+     "write this down",
+     "band",
+     "origin city"
+    ],
+    [
+     "minneapolis",
+     "mississippi river"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Write This Down",
+     "Oklahoma City"
+    ],
+    [
+     "Write This Down",
+     "Oklahoma City"
+    ],
+    [
+     "Write This Down",
+     "body of water"
+    ]
+   ]
+  },
+  {
+   "idx": 75,
+   "question": "How were people from whom new coins were a proclamation of independence by the Somali Muslim Ajuran Empire expelled from the natural boundary between Thailand and A Don's country?",
+   "brgd_rounds": [
+    [
+     "ajuran empire",
+     "portuguese",
+     "ottoman",
+     "coinage",
+     "indian ocean"
+    ],
+    [
+     "portuguese",
+     "ottoman",
+     "indian ocean",
+     "horn of africa",
+     "maritime trade"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Somali Muslim Ajuran Empire",
+     "Thailand"
+    ],
+    [
+     "Somali Muslim Ajuran Empire",
+     "Thailand"
+    ],
+    [
+     "Somali Muslim Ajuran Empire",
+     "Thailand"
+    ]
+   ]
+  },
+  {
+   "idx": 76,
+   "question": "Who is the father of Empress Wang's husband?",
+   "brgd_rounds": [
+    [
+     "yang pu",
+     "yang xingmi",
+     "wu state",
+     "emperor rui"
+    ],
+    [
+     "yang pu",
+     "yang xingmi",
+     "wu state",
+     "five dynasties and ten kingdoms"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Empress Wang",
+     "Yang Pu"
+    ],
+    [
+     "Empress Wang",
+     "Yang Pu"
+    ],
+    [
+     "Empress Wang",
+     "Yang Pu"
+    ]
+   ]
+  },
+  {
+   "idx": 77,
+   "question": "When did the country with a co-official language used in the film titled after the city that is the final resting place of Tito first attend the Olympics games?",
+   "brgd_rounds": [
+    [
+     "belgrade",
+     "serbian",
+     "bosnia and herzegovina",
+     "tito"
+    ],
+    [
+     "house of flowers",
+     "bosnia and herzegovina",
+     "serbian",
+     "1992 summer olympics",
+     "belgrade documentary"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Serbia",
+     "Belgrade"
+    ],
+    [
+     "Tito",
+     "Belgrade"
+    ],
+    [
+     "Serbia",
+     "Olympics"
+    ]
+   ]
+  },
+  {
+   "idx": 78,
+   "question": "Who is the spouse of the actress who played the fairy god mother in Shrek 2?",
+   "brgd_rounds": [
+    [
+     "jennifer saunders"
+    ],
+    [
+     "jennifer saunders"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Jennifer Saunders",
+     "Shrek 2"
+    ],
+    [
+     "Jennifer Saunders",
+     "Adrian Edmondson"
+    ],
+    [
+     "Jennifer Saunders",
+     "Adrian Edmondson"
+    ]
+   ]
+  },
+  {
+   "idx": 79,
+   "question": "When was the last time Darren Carter's team beat the 1894-95 FA Cup winner?",
+   "brgd_rounds": [
+    [
+     "1894-95 fa cup winner",
+     "darren carter"
+    ],
+    [
+     "1894\u201395 fa cup"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Darren Carter",
+     "Notts County"
+    ],
+    [
+     "Darren Carter",
+     "1894\u201395 FA Cup winner"
+    ],
+    [
+     "Darren Carter",
+     "1894-95 FA Cup winner"
+    ]
+   ]
+  },
+  {
+   "idx": 80,
+   "question": "What is the name of the famous bridge in the city where the composer of La Silvia was born?",
+   "brgd_rounds": [
+    [
+     "alessandria",
+     "giuseppe demachi"
+    ],
+    [
+     "giuseppe demachi",
+     "alessandria"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "La Silvia",
+     "Giuseppe Demachi"
+    ],
+    [
+     "Giovanni Battista Pergolesi",
+     "Jesi"
+    ],
+    [
+     "La Silvia",
+     "Venice"
+    ]
+   ]
+  },
+  {
+   "idx": 81,
+   "question": "Who is the spouse of the actor that plays Jarvis in the Avengers Age of Ultron?",
+   "brgd_rounds": [
+    [
+     "paul bettany"
+    ],
+    [
+     "paul bettany",
+     "jarvis",
+     "avengers: age of ultron"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Paul Bettany",
+     "Jennifer Connelly"
+    ],
+    [
+     "Paul Bettany",
+     "J.A.R.V.I.S."
+    ],
+    [
+     "Paul Bettany",
+     "Avengers: Age of Ultron"
+    ]
+   ]
+  },
+  {
+   "idx": 82,
+   "question": "What is the location of formation of the film company distributing The Boss?",
+   "brgd_rounds": [
+    [
+     "world film company",
+     "fort lee",
+     "new jersey"
+    ]
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "The Boss",
+     "World Film Company"
+    ],
+    [
+     "The Boss",
+     "World Film Company"
+    ],
+    [
+     "The Boss",
+     "World Film Company"
+    ]
+   ]
+  },
+  {
+   "idx": 83,
+   "question": "How long are the city council terms in the second largest city in the state where Yuma is located?",
+   "brgd_rounds": [
+    [
+     "arizona",
+     "tucson",
+     "san diego"
+    ],
+    [
+     "tucson",
+     "arizona",
+     "city council terms",
+     "four-year terms"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Yuma",
+     "Arizona"
+    ],
+    [
+     "Yuma",
+     "Tucson"
+    ],
+    [
+     "Yuma",
+     "Arizona"
+    ]
+   ]
+  },
+  {
+   "idx": 84,
+   "question": "Who is the child of the president under whom prohibition occurred?",
+   "brgd_rounds": [
+    [
+     "woodrow wilson",
+     "eighteenth amendment",
+     "volstead act"
+    ],
+    [
+     "jessie woodrow wilson sayre",
+     "margaret wilson",
+     "eleanor wilson"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Woodrow Wilson",
+     "Prohibition"
+    ],
+    [
+     "Woodrow Wilson",
+     "Jessie Woodrow Wilson Sayre"
+    ],
+    [
+     "Woodrow Wilson",
+     "Jessie Woodrow Wilson Sayre"
+    ]
+   ]
+  },
+  {
+   "idx": 85,
+   "question": "What administrative territorial entity contains the place where KPRM is licensed to broadcast to?",
+   "brgd_rounds": [
+    [
+     "park rapids",
+     "minnesota"
+    ],
+    [
+     "park rapids",
+     "hubbard county"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "KPRM",
+     "Park Rapids, Minnesota"
+    ],
+    [
+     "KPRM",
+     "Park Rapids, Minnesota"
+    ],
+    [
+     "KPRM",
+     "Park Rapids"
+    ]
+   ]
+  },
+  {
+   "idx": 86,
+   "question": "Who played the girlfriend of who plays marty mcfly's daughter in back to the future 2?",
+   "brgd_rounds": [
+    [
+     "marlene mcfly",
+     "2015",
+     "back to the future part ii"
+    ],
+    [
+     "marlene mcfly",
+     "2015 timeline",
+     "back to the future part ii"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Back to the Future Part II",
+     "Marty McFly"
+    ],
+    [
+     "Michael J. Fox",
+     "Claudia Wells"
+    ],
+    [
+     "Marty McFly",
+     "Back to the Future Part II"
+    ]
+   ]
+  },
+  {
+   "idx": 87,
+   "question": "When was the death penalty abolished in the country near the country where the writer of The Book Thief is a citizen of?",
+   "brgd_rounds": [
+    [
+     "the book thief",
+     "author",
+     "death penalty abolition"
+    ],
+    [
+     "markus zusak"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Markus Zusak",
+     "New Zealand"
+    ],
+    [
+     "Markus Zusak",
+     "New Zealand"
+    ],
+    [
+     "The Book Thief",
+     "Markus Zusak"
+    ]
+   ]
+  },
+  {
+   "idx": 88,
+   "question": "What is the tallest building in the state where KZAR is located?",
+   "brgd_rounds": [
+    [
+     "texas",
+     "mcqueeney",
+     "san antonio"
+    ],
+    [
+     "jpmorgan chase tower",
+     "houston",
+     "texas commerce tower"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "KZAR",
+     "Texas"
+    ],
+    [
+     "KZAR",
+     "Texas"
+    ],
+    [
+     "KZAR",
+     "Texas"
+    ]
+   ]
+  },
+  {
+   "idx": 89,
+   "question": "What is the maximum load drawn by the 1.0 and 2.0 versions of the device that replaced FireWire in later iPods?",
+   "brgd_rounds": [
+    [
+     "ipod nano",
+     "ipod classic",
+     "usb 1.x",
+     "usb 2.0",
+     "bus-powered"
+    ],
+    [
+     "ipod nano 1st generation",
+     "ipod classic 5th generation",
+     "usb enumeration",
+     "charging downstream port",
+     "bus-powered device"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "USB 1.0",
+     "USB 2.0"
+    ],
+    [
+     "USB 1.0",
+     "USB 2.0"
+    ],
+    [
+     "USB 1.0",
+     "USB 2.0"
+    ]
+   ]
+  },
+  {
+   "idx": 90,
+   "question": "Where is the headquarters of Radio Television of this country that has a co-official language that is the same as the language of Olivera Markovic?",
+   "brgd_rounds": [
+    [
+     "serbia",
+     "serbian",
+     "bosnia and herzegovina",
+     "montenegro",
+     "kosovo"
+    ],
+    [
+     "serbia",
+     "bosnia and herzegovina",
+     "montenegro",
+     "kosovo",
+     "rts"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Olivera Markovic",
+     "Serbia"
+    ],
+    [
+     "Olivera Markovic",
+     "Kosovo"
+    ],
+    [
+     "Olivera Markovic",
+     "Kosovo"
+    ]
+   ]
+  },
+  {
+   "idx": 91,
+   "question": "What county has a city that is adjacent to the capital city of Erskine College's state?",
+   "brgd_rounds": [
+    [
+     "south carolina",
+     "columbia",
+     "due west"
+    ],
+    [
+     "columbia",
+     "richland county",
+     "lexington county",
+     "west columbia",
+     "cayce"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Erskine College",
+     "South Carolina"
+    ],
+    [
+     "Erskine College",
+     "South Carolina"
+    ],
+    [
+     "Erskine College",
+     "South Carolina"
+    ]
+   ]
+  },
+  {
+   "idx": 92,
+   "question": "When did the majority party in the House of Representatives gain control of the body which determines rules of the US House and US Senate?",
+   "brgd_rounds": [
+    [
+     "house rules committee",
+     "senate standing rules",
+     "article one section 5"
+    ],
+    [
+     "house rules committee",
+     "standing rules of the senate",
+     "article one section 5"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "House of Representatives",
+     "US Senate"
+    ],
+    [
+     "House of Representatives",
+     "US Senate"
+    ],
+    [
+     "House of Representatives",
+     "Rules Committee"
+    ]
+   ]
+  },
+  {
+   "idx": 93,
+   "question": "When did Nissan, the Acura Legend maker and the Scion Fuse manufacturer open US assembly plants?",
+   "brgd_rounds": [
+    [
+     "datsun",
+     "voluntary export restraints",
+     "chicken tax",
+     "acura",
+     "scion"
+    ],
+    [
+     "nissan us assembly plant",
+     "1981 voluntary export restraints",
+     "chicken tax",
+     "honda acura",
+     "toyota scion"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Nissan",
+     "1981 voluntary export restraints"
+    ],
+    [
+     "Nissan",
+     "US assembly plants"
+    ],
+    [
+     "Nissan",
+     "1973 oil crisis"
+    ]
+   ]
+  },
+  {
+   "idx": 94,
+   "question": "Who had the lowest batting average in the league where the team with the most games in the series after which the MLB MVP is awarded played?",
+   "brgd_rounds": [
+    [
+     "world series",
+     "mlb mvp",
+     "postseason games",
+     "al",
+     "nl"
+    ],
+    [
+     "world series",
+     "mlb mvp",
+     "postseason games",
+     "american league",
+     "national league"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "MLB MVP",
+     "World Series"
+    ],
+    [
+     "MLB MVP",
+     "World Series"
+    ],
+    [
+     "MLB MVP",
+     "World Series"
+    ]
+   ]
+  },
+  {
+   "idx": 95,
+   "question": "What is the public library system called in the place where the Cosbys live in New York?",
+   "brgd_rounds": [
+    [
+     "brooklyn public library",
+     "brooklyn heights"
+    ]
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "The Cosby Show",
+     "Brooklyn Public Library"
+    ],
+    [
+     "The Cosby Show",
+     "Brooklyn Public Library"
+    ],
+    [
+     "The Cosbys",
+     "Brooklyn"
+    ]
+   ]
+  },
+  {
+   "idx": 96,
+   "question": "What is an example of a railroad line in the country first to invade Manchuria?",
+   "brgd_rounds": [
+    [
+     "manchukuo",
+     "japanese",
+     "south manchuria railway"
+    ],
+    [
+     "south manchuria railway",
+     "manchukuo",
+     "empire of japan",
+     "northeast china"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Japan",
+     "Shanghai\u2013Hangzhou high-speed railway"
+    ],
+    [
+     "Japan",
+     "Yamanote Line"
+    ],
+    [
+     "Japan",
+     "Yamanote Line"
+    ]
+   ]
+  },
+  {
+   "idx": 97,
+   "question": "Who is the child of the Victim of Romance performer?",
+   "brgd_rounds": [
+    [
+     "michelle phillips",
+     "chynna phillips"
+    ]
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Michelle Phillips",
+     "Chynna Phillips"
+    ],
+    [
+     "Michelle Phillips",
+     "Chynna Phillips"
+    ],
+    [
+     "Michelle Phillips",
+     "Chynna Phillips"
+    ]
+   ]
+  },
+  {
+   "idx": 98,
+   "question": "How many times did the plague occur in the birth place of Concerto in C Major Op 3 6's composer?",
+   "brgd_rounds": [
+    [
+     "antonio vivaldi",
+     "venice"
+    ],
+    [
+     "venice",
+     "1576\u201377 plague",
+     "italian plague of 1629\u20131631"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Concerto in C Major Op 3 No 6",
+     "Antonio Vivaldi"
+    ],
+    [
+     "Concerto in C Major Op 3 6",
+     "Antonio Vivaldi"
+    ],
+    [
+     "Concerto in C Major Op 3 6",
+     "Antonio Vivaldi"
+    ]
+   ]
+  },
+  {
+   "idx": 99,
+   "question": "When was the region immediately north of the region where the country in which Aluf can be found is located and the Persian Gulf established?",
+   "brgd_rounds": [
+    [
+     "al-ahsa",
+     "eastern arabia",
+     "iran",
+     "caspian sea",
+     "persian gulf"
+    ],
+    [
+     "israel",
+     "al-ahsa",
+     "eastern arabia",
+     "persian gulf",
+     "caspi an sea"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Persian Gulf",
+     "region immediately north of the region where the country in which Aluf can be found is located"
+    ],
+    [
+     "Persian Gulf",
+     "Southern Arabia"
+    ],
+    [
+     "Aluf",
+     "Persian Gulf"
+    ]
+   ]
+  },
+  {
+   "idx": 100,
+   "question": "When did the performer of I Love Life, Thank You release Best Day Ever?",
+   "brgd_rounds": [
+    [
+     "mac miller"
+    ]
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Mac Miller",
+     "Best Day Ever"
+    ],
+    [
+     "Mac Miller",
+     "Best Day Ever"
+    ],
+    [
+     "Mac Miller",
+     "Best Day Ever"
+    ]
+   ]
+  },
+  {
+   "idx": 101,
+   "question": "Between the state university in the state without North Point Mall and where Edwards won the primary and the university in Fort Hill's town which has the more national championships?",
+   "brgd_rounds": [
+    [],
+    [
+     "south carolina",
+     "university of pittsburgh",
+     "penn state",
+     "oklahoma",
+     "north carolina state university"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "state university",
+     "university in Fort Hill's town"
+    ],
+    [
+     "North Point Mall",
+     "Fort Hill"
+    ],
+    [
+     "North Point Mall",
+     "Fort Hill"
+    ]
+   ]
+  },
+  {
+   "idx": 102,
+   "question": "What is the population in 2010 of they city popular with tourists?",
+   "brgd_rounds": [
+    [
+     "london",
+     "579999"
+    ],
+    [
+     "579,999",
+     "2010 census",
+     "tourist destination"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "London",
+     "2010 census"
+    ],
+    [
+     "London",
+     "2010"
+    ],
+    [
+     "London",
+     "2010"
+    ]
+   ]
+  },
+  {
+   "idx": 103,
+   "question": "How many people work at the school that holds the Julian P. Kanter Political Commercial Archive?",
+   "brgd_rounds": [
+    [
+     "university of oklahoma"
+    ],
+    [
+     "university of oklahoma",
+     "julian p. kanter political commercial archive"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Julian P. Kanter Political Commercial Archive",
+     "University of Oklahoma"
+    ],
+    [
+     "Julian P. Kanter Political Commercial Archive",
+     "University of Oklahoma"
+    ],
+    [
+     "Julian P. Kanter Political Commercial Archive",
+     "University of Oklahoma"
+    ]
+   ]
+  },
+  {
+   "idx": 104,
+   "question": "When did the U.S. and the country in effective control of political and military functions of the group the People's Socialist Republic of Albania was a member of become allies?",
+   "brgd_rounds": [
+    [
+     "warsaw pact",
+     "soviet union",
+     "world war ii",
+     "allies"
+    ],
+    [
+     "warsaw pact",
+     "soviet union",
+     "world war ii",
+     "nazi germany",
+     "allied powers"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "People's Socialist Republic of Albania",
+     "Warsaw Pact"
+    ],
+    [
+     "United States",
+     "Soviet Union"
+    ],
+    [
+     "United States",
+     "Soviet Union"
+    ]
+   ]
+  },
+  {
+   "idx": 105,
+   "question": "Who were the leaders of the opposition of the party that controlled the house of representatives in 2002?",
+   "brgd_rounds": [
+    [
+     "republican party",
+     "democratic party",
+     "108th congress",
+     "nancy pelosi",
+     "2002 united states house of representatives elections"
+    ],
+    [
+     "108th congress",
+     "democratic party",
+     "minority leader",
+     "minority whip",
+     "house democratic caucus"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Democratic Party",
+     "House of Representatives"
+    ],
+    [
+     "Democratic Party",
+     "House of Representatives"
+    ],
+    [
+     "Republican Party",
+     "Democratic Party"
+    ]
+   ]
+  },
+  {
+   "idx": 106,
+   "question": "In what state is the district where the man who wanted to reform the religion practiced by Innocenzo Ferrieri preached a sermon on Marian devotion?",
+   "brgd_rounds": [
+    [
+     "saint john of capestrano",
+     "abruzzo",
+     "mission san juan capistrano",
+     "san antonio",
+     "texas"
+    ],
+    [
+     "saint john of capestrano",
+     "mission san juan capistrano",
+     "san antonio texas",
+     "abruzzo",
+     "franciscan order"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Innocenzo Ferrieri",
+     "Marian devotion"
+    ],
+    [
+     "Innocenzo Ferrieri",
+     "Marian devotion"
+    ],
+    [
+     "Innocenzo Ferrieri",
+     "Martin Luther"
+    ]
+   ]
+  },
+  {
+   "idx": 107,
+   "question": "What UK label was purchased by the company that, along with the distributor of The Cube, and ABC, is the other major New York-based broadcaster?",
+   "brgd_rounds": [
+    [
+     "koch entertainment",
+     "e1 entertainment",
+     "abc radio",
+     "the cube"
+    ],
+    [
+     "nbc",
+     "abc"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "The Cube",
+     "ABC"
+    ],
+    [
+     "HMV",
+     "ABC"
+    ],
+    [
+     "The Cube",
+     "ABC"
+    ]
+   ]
+  },
+  {
+   "idx": 108,
+   "question": "What date saw the writing of the song where the devil went down to the state where WDXQ is located?",
+   "brgd_rounds": [
+    [
+     "wadxq",
+     "tennessee",
+     "chattanooga",
+     "charlie daniels band",
+     "vassar clements"
+    ],
+    [
+     "cochran",
+     "georgia",
+     "charlie daniels band",
+     "lonesome fiddle blues",
+     "vassar clements"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "The Devil Went Down to Georgia",
+     "Georgia"
+    ],
+    [
+     "The Devil Went Down to Georgia",
+     "Georgia"
+    ],
+    [
+     "The Devil Went Down to Georgia",
+     "Georgia"
+    ]
+   ]
+  },
+  {
+   "idx": 109,
+   "question": "What is the experimental satellite that was the forerunner to communication satellite of the operator of INSAT-4CR called?",
+   "brgd_rounds": [
+    [
+     "isro",
+     "ats-6",
+     "satellite instructional television experiment",
+     "site",
+     "apple"
+    ],
+    [
+     "ats-6",
+     "site",
+     "apple",
+     "insat series",
+     "1970s"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "INSAT-4CR",
+     "ATS-6"
+    ],
+    [
+     "INSAT-4CR",
+     "ATS-6"
+    ],
+    [
+     "INSAT-4CR",
+     "ATS-6"
+    ]
+   ]
+  },
+  {
+   "idx": 110,
+   "question": "Who won the 1993 Indy Car Race in the largest city of the state containing the city where the performer of the album Mingus Three is from?",
+   "brgd_rounds": [
+    [
+     "charles mingus",
+     "phoenix",
+     "mario andretti"
+    ],
+    [
+     "nogales",
+     "arizona",
+     "phoenix",
+     "mario andretti"
+    ]
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Charles Mingus",
+     "1993 Indy Car Race"
+    ],
+    [
+     "Charles Mingus",
+     "1993 Indy Car Race"
+    ],
+    [
+     "Mingus Three",
+     "1993 Indy Car Race"
+    ]
+   ]
+  },
+  {
+   "idx": 111,
+   "question": "What mountain can you see from Portland in the state where Fishing Creek Confederacy is located?",
+   "brgd_rounds": [
+    [
+     "portland pennsylvania",
+     "blue mountain",
+     "columbia county pennsylvania",
+     "susquehanna river",
+     "ridge-and-valley appalachians"
+    ],
+    [
+     "north mountain",
+     "portland pennsylvania",
+     "fishing creek",
+     "ridge-and-valley appalachians",
+     "susquehanna river"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Fishing Creek Confederacy",
+     "Portland"
+    ],
+    [
+     "Portland",
+     "Fishing Creek Confederacy"
+    ],
+    [
+     "Fishing Creek Confederacy",
+     "Portland"
+    ]
+   ]
+  },
+  {
+   "idx": 112,
+   "question": "When was Burma's name changed to that of the country on the natural boundary between the country that hosted the tournament and the country where That Dam is from?",
+   "brgd_rounds": [
+    [
+     "laos",
+     "vientiane",
+     "1989",
+     "slorc",
+     "union of myanmar"
+    ],
+    [
+     "that dam",
+     "vientiane",
+     "laos",
+     "myanmar",
+     "1989"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Burma",
+     "Laos"
+    ],
+    [
+     "Burma",
+     "Myanmar"
+    ],
+    [
+     "Burma",
+     "Laos"
+    ]
+   ]
+  },
+  {
+   "idx": 113,
+   "question": "When did the maker of the Acura EL, the company that owns Scion, and Nissan, open US assembly plants?",
+   "brgd_rounds": [
+    [
+     "honda",
+     "toyota",
+     "nissan",
+     "acura",
+     "lexus"
+    ],
+    [
+     "marysville",
+     "georgetown",
+     "smyrna",
+     "nummi"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Acura EL",
+     "Scion"
+    ],
+    [
+     "Acura EL",
+     "Nissan"
+    ],
+    [
+     "Acura EL",
+     "Scion"
+    ]
+   ]
+  },
+  {
+   "idx": 114,
+   "question": "What dissolved the privileges in Poland of the empire that the British sided with against the Ottomans, the Kingdom that acquired some Thuringian territory in 1815, and the Habsburg Monarchy?",
+   "brgd_rounds": [
+    [
+     "russian empire",
+     "kingdom of prussia",
+     "habsburg monarchy",
+     "partitions of poland",
+     "szlachta"
+    ],
+    [
+     "szlachta",
+     "partitions of poland",
+     "march constitution of 1921",
+     "congress kingdom",
+     "grand duchy of warsaw"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Habsburg Monarchy",
+     "Kingdom of Prussia"
+    ],
+    [
+     "Second Polish Republic",
+     "March Constitution of 1921"
+    ],
+    [
+     "March Constitution of 1921",
+     "Second Polish Republic"
+    ]
+   ]
+  },
+  {
+   "idx": 115,
+   "question": "When did the political party of Stewart and Harlan take control of the body that has Standing Rules derived from Article One that do not apply to the House?",
+   "brgd_rounds": [
+    [
+     "republican party",
+     "u.s. senate",
+     "37th congress",
+     "william m. stewart",
+     "john marshall harlan"
+    ],
+    [
+     "william m. stewart",
+     "james harlan",
+     "37th united states congress",
+     "1861"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Stewart",
+     "Harlan"
+    ],
+    [
+     "Republican Party",
+     "U.S. Senate"
+    ],
+    [
+     "Stewart",
+     "Harlan"
+    ]
+   ]
+  },
+  {
+   "idx": 116,
+   "question": "Who is the grandmother of Philippe, Duke of Orl\u00e9ans?",
+   "brgd_rounds": [
+    [
+     "louis xiii",
+     "anne of austria"
+    ],
+    [
+     "marie de medici",
+     "margaret of austria"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Philippe, Duke of Orl\u00e9ans",
+     "Anne of Austria"
+    ],
+    [
+     "Philippe, Duke of Orl\u00e9ans",
+     "Anne of Austria"
+    ],
+    [
+     "Philippe, Duke of Orl\u00e9ans",
+     "Anne of Austria"
+    ]
+   ]
+  },
+  {
+   "idx": 117,
+   "question": "Who's the son of the Italian navigator who explored the eastern coast of the continent Manuel Balbi was born in?",
+   "brgd_rounds": [
+    [
+     "john cabot",
+     "sebastian cabot",
+     "giovanni caboto",
+     "north america",
+     "newfoundland"
+    ],
+    [
+     "john cabot",
+     "sebastian cabot",
+     "north america",
+     "giovanni caboto"
+    ]
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "John Cabot",
+     "Sebastian Cabot"
+    ],
+    [
+     "Manuel Balbi",
+     "John Cabot"
+    ],
+    [
+     "Manuel Balbi",
+     "Italian navigator"
+    ]
+   ]
+  },
+  {
+   "idx": 118,
+   "question": "What is the deepest part of the ocean by the state where Main Street Station is located?",
+   "brgd_rounds": [
+    [
+     "puerto rico trench",
+     "mariana trench",
+     "challenger deep",
+     "milwaukee deep"
+    ],
+    [
+     "mariana trench",
+     "puerto rico trench",
+     "challenger deep",
+     "milwaukee deep",
+     "atlantic ocean"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Main Street Station",
+     "Mariana Trench"
+    ],
+    [
+     "Main Street Station",
+     "Nevada"
+    ],
+    [
+     "Main Street Station",
+     "Nevada"
+    ]
+   ]
+  },
+  {
+   "idx": 119,
+   "question": "What is the name of the castle in the city where the performer of Never Too Loud was formed?",
+   "brgd_rounds": [
+    [
+     "danko jones"
+    ],
+    [
+     "toronto"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Danko Jones",
+     "Toronto"
+    ],
+    [
+     "Danko Jones",
+     "Toronto"
+    ],
+    [
+     "Danko Jones",
+     "Toronto"
+    ]
+   ]
+  },
+  {
+   "idx": 120,
+   "question": "Who has the most hits in the league whose member team has the most wins of the championship series which proceeds the MVP award?",
+   "brgd_rounds": [
+    [
+     "world series",
+     "new york yankees",
+     "mlb"
+    ],
+    [
+     "new york yankees",
+     "world series",
+     "mlb"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "NBA",
+     "Bill Russell"
+    ],
+    [
+     "NBA Finals",
+     "Boston Celtics"
+    ],
+    [
+     "NBA",
+     "Bill Russell"
+    ]
+   ]
+  },
+  {
+   "idx": 121,
+   "question": "Which university employed the person that Mach bands are named after?",
+   "brgd_rounds": [
+    [
+     "ernst mach",
+     "charles university in prague"
+    ],
+    [
+     "ernst mach",
+     "charles university in prague",
+     "university of vienna",
+     "university of graz"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Ernst Mach",
+     "Charles University"
+    ],
+    [
+     "Ernst Mach",
+     "Charles University in Prague"
+    ],
+    [
+     "Ernst Mach",
+     "Charles University"
+    ]
+   ]
+  },
+  {
+   "idx": 122,
+   "question": "What is the maximum load drawn by the device that was designed to standardize connection of computer peripherals?",
+   "brgd_rounds": [
+    [
+     "usb",
+     "unit load",
+     "usb 1.x",
+     "usb 2.0",
+     "usb 3.0"
+    ]
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "USB",
+     "computer peripherals"
+    ],
+    [
+     "USB",
+     "computer peripherals"
+    ],
+    [
+     "USB",
+     "computer peripherals"
+    ]
+   ]
+  },
+  {
+   "idx": 123,
+   "question": "Where is the headquarters of the organization that the Office of Science Education is a part of?",
+   "brgd_rounds": [
+    [
+     "national institutes of health",
+     "nih"
+    ],
+    [
+     "national institutes of health",
+     "bethesda",
+     "maryland"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Office of Science Education",
+     "National Institutes of Health"
+    ],
+    [
+     "Office of Science Education",
+     "National Institutes of Health"
+    ],
+    [
+     "Office of Science Education",
+     "National Institutes of Health"
+    ]
+   ]
+  },
+  {
+   "idx": 124,
+   "question": "Which countries found economic growth while cog-railways were built in the Alps?",
+   "brgd_rounds": [
+    [
+     "austria",
+     "switzerland",
+     "jungfraubahn",
+     "schafberg railway",
+     "achensee railway"
+    ],
+    [
+     "schafberg railway",
+     "achensee railway",
+     "jungfraubahn",
+     "tourism expansion",
+     "belle \u00e9poque"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Austria",
+     "Switzerland"
+    ],
+    [
+     "Switzerland",
+     "Austria"
+    ],
+    [
+     "Alps",
+     "cog-railways"
+    ]
+   ]
+  },
+  {
+   "idx": 125,
+   "question": "Who is the chief judge of Friday Osanebi's birthplace?",
+   "brgd_rounds": [
+    [
+     "delta state"
+    ],
+    [
+     "delta state"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Friday Osanebi",
+     "Nigeria"
+    ],
+    [
+     "Friday Osanebi",
+     "Delta State"
+    ],
+    [
+     "Friday Osanebi",
+     "Delta State"
+    ]
+   ]
+  },
+  {
+   "idx": 126,
+   "question": "When does the river that the majority of Egyptians live near flood each year?",
+   "brgd_rounds": [
+    [
+     "nile",
+     "wafaa el-nil",
+     "inundation",
+     "blue nile",
+     "white nile"
+    ],
+    [
+     "wafaa el-nil",
+     "nile inundation",
+     "basin irrigation",
+     "aswan",
+     "blue nile"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Nile",
+     "Egyptians"
+    ],
+    [
+     "Nile",
+     "Wafaa El-Nil"
+    ],
+    [
+     "Nile",
+     "Egyptians"
+    ]
+   ]
+  },
+  {
+   "idx": 127,
+   "question": "Who was president when congress declared war on the country where Glumpers was filmed?",
+   "brgd_rounds": [
+    [
+     "the patriot",
+     "south carolina",
+     "revolutionary war",
+     "great britain",
+     "james madison"
+    ],
+    [
+     "the patriot",
+     "great britain",
+     "war of 1812",
+     "james madison"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Woodrow Wilson",
+     "German Empire"
+    ],
+    [
+     "Glumpers",
+     "country"
+    ],
+    [
+     "Glumpers",
+     "Spain"
+    ]
+   ]
+  },
+  {
+   "idx": 128,
+   "question": "What year did the company that published Starship Command end?",
+   "brgd_rounds": [
+    [
+     "acornsoft"
+    ],
+    [
+     "acornsoft",
+     "david johnson-davies"
+    ]
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Acornsoft",
+     "Starship Command"
+    ],
+    [
+     "Starship Command",
+     "Acornsoft"
+    ],
+    [
+     "Starship Command",
+     "Acornsoft"
+    ]
+   ]
+  },
+  {
+   "idx": 129,
+   "question": "Who was the US physicist who directed the project that developed the first atomic bomb at the same place where Feynman worked on Water Boiler?",
+   "brgd_rounds": [
+    [
+     "los alamos",
+     "robert oppenheimer",
+     "manhattan project"
+    ]
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Robert Oppenheimer",
+     "Los Alamos"
+    ],
+    [
+     "Robert Oppenheimer",
+     "Manhattan Project"
+    ],
+    [
+     "Robert Oppenheimer",
+     "Manhattan Project"
+    ]
+   ]
+  },
+  {
+   "idx": 130,
+   "question": "What season was the performer of Blue Skies on?",
+   "brgd_rounds": [
+    [
+     "diana degarmo",
+     "american idol"
+    ],
+    [
+     "fantasia barrino",
+     "jennifer hudson",
+     "season three"
+    ]
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Blue Skies",
+     "Diana DeGarmo"
+    ],
+    [
+     "Blue Skies",
+     "American Idol"
+    ],
+    [
+     "Diana DeGarmo",
+     "Blue Skies"
+    ]
+   ]
+  },
+  {
+   "idx": 131,
+   "question": "What label was responsible for the performer of Live Life Loud?",
+   "brgd_rounds": [
+    [
+     "hawk nelson",
+     "live life loud",
+     "jason dunn"
+    ],
+    [
+     "hawk nelson",
+     "live life loud",
+     "jason dunn"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Live Life Loud",
+     "Hawk Nelson"
+    ],
+    [
+     "Live Life Loud",
+     "Hawk Nelson"
+    ],
+    [
+     "Live Life Loud",
+     "Hawk Nelson"
+    ]
+   ]
+  },
+  {
+   "idx": 132,
+   "question": "What city is located in the county containing Qiantong?",
+   "brgd_rounds": [
+    [
+     "ninghai county",
+     "ningbo",
+     "county seat"
+    ],
+    [
+     "ninghai county",
+     "county seat",
+     "ningbo"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Qiantong",
+     "Ninghai County"
+    ],
+    [
+     "Qiantong",
+     "Ninghai County"
+    ],
+    [
+     "Qiantong",
+     "Ninghai County"
+    ]
+   ]
+  },
+  {
+   "idx": 133,
+   "question": "A country's military branch, the equivalent of which in the US contains the Air Defense Artillery, was unprepared for the invasion of the country occupied by the Nazi's. When was the word \"Slavs\" used in the national anthem of the unprepared country?",
+   "brgd_rounds": [
+    [
+     "slovak republic (1939\u20131945)",
+     "yugoslavia",
+     "czechoslovakia",
+     "prague spring",
+     "warwick pact"
+    ],
+    [
+     "slovak republic (1939\u20131945)",
+     "national anthem",
+     "slavs",
+     "lyrics",
+     "adoption date"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Czechoslovakia",
+     "Slovak Republic (1939\u20131945)"
+    ],
+    [
+     "Czechoslovakia",
+     "Yugoslavia"
+    ],
+    [
+     "Czechoslovakia",
+     "Yugoslavia"
+    ]
+   ]
+  },
+  {
+   "idx": 134,
+   "question": "What award was received by the person who authored Missing Person?",
+   "brgd_rounds": [
+    [
+     "patrick modiano",
+     "prix goncourt",
+     "rue des boutiques obscures"
+    ]
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Patrick Modiano",
+     "Missing Person"
+    ],
+    [
+     "Patrick Modiano",
+     "Missing Person"
+    ],
+    [
+     "Patrick Modiano",
+     "Missing Person"
+    ]
+   ]
+  },
+  {
+   "idx": 135,
+   "question": "What does the abbreviated name of the organization that includes the Scottish Football Association as a member, stand for?",
+   "brgd_rounds": [
+    [
+     "fifa"
+    ],
+    [
+     "fifa",
+     "scottish football association",
+     "international federation of association football"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "FIFA",
+     "Scottish Football Association"
+    ],
+    [
+     "Scottish Football Association",
+     "FIFA"
+    ],
+    [
+     "Scottish Football Association",
+     "FIFA"
+    ]
+   ]
+  },
+  {
+   "idx": 136,
+   "question": "How many students attend the school that employs Roberto Andorno?",
+   "brgd_rounds": [
+    [
+     "university of zurich",
+     "faculty of law"
+    ],
+    [
+     "university of zurich",
+     "roberto andorno"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Roberto Andorno",
+     "University of Zurich"
+    ],
+    [
+     "Roberto Andorno",
+     "University of Zurich"
+    ],
+    [
+     "Roberto Andorno",
+     "University of Zurich"
+    ]
+   ]
+  },
+  {
+   "idx": 137,
+   "question": "The person whom Sikyona is named after is part of what?",
+   "brgd_rounds": [
+    [
+     "sicyon",
+     "eponym",
+     "greek mythology",
+     "polis",
+     "corinthia"
+    ],
+    [
+     "sicyon",
+     "eponym",
+     "polis",
+     "corinthia",
+     "legendary king"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Sikyona",
+     "Greek mythology"
+    ],
+    [
+     "Sikyona",
+     "Sicyon"
+    ],
+    [
+     "Sikyona",
+     "Greek mythology"
+    ]
+   ]
+  },
+  {
+   "idx": 138,
+   "question": "Who wrote the fictional work Doctor Fate exists in?",
+   "brgd_rounds": [
+    [],
+    [],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Doctor Fate",
+     "fictional work"
+    ],
+    [
+     "Doctor Fate",
+     "fictional work"
+    ],
+    [
+     "Doctor Fate",
+     "fictional work"
+    ]
+   ]
+  },
+  {
+   "idx": 139,
+   "question": "The 2010 study found that what modern population is most closely related to the group that represents at least 70% of Jews worldwide?",
+   "brgd_rounds": [
+    [
+     "ashkenazi jews",
+     "italians",
+     "atzmon-ostrer et al.",
+     "bray et al.",
+     "behav et al."
+    ]
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Ashkenazi Jews",
+     "Italians"
+    ],
+    [
+     "Ashkenazi Jews",
+     "Italians"
+    ],
+    [
+     "Ashkenazi Jews",
+     "Italians"
+    ]
+   ]
+  },
+  {
+   "idx": 140,
+   "question": "When did the party who holds the majority in the House of Representatives, take control of the political body that the President calls on for support in his USAF appointments?",
+   "brgd_rounds": [
+    [
+     "senate",
+     "usaf appointments",
+     "confirmation",
+     "advice and consent",
+     "114th congress"
+    ],
+    [
+     "109th congress",
+     "114th congress",
+     "january 2007",
+     "january 3 2015",
+     "republican party"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "House of Representatives",
+     "Senate"
+    ],
+    [
+     "House of Representatives",
+     "Senate"
+    ],
+    [
+     "House of Representatives",
+     "Senate"
+    ]
+   ]
+  },
+  {
+   "idx": 141,
+   "question": "Kiwil's birth country participated in a Commission of Truth and Friendship. Who is the president of the other country that participated?",
+   "brgd_rounds": [
+    [
+     "timor-leste",
+     "aniceto guterres lopes",
+     "commission of truth and friendship"
+    ],
+    [
+     "timor-leste",
+     "commission of truth and friendship",
+     "susilo bambang yudhoyono",
+     "aniceto guterres lopes"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Kiwil",
+     "Commission of Truth and Friendship"
+    ],
+    [
+     "Kiwil",
+     "Indonesia"
+    ],
+    [
+     "Kiwil",
+     "Indonesia\u2013Timor Leste Commission on Truth and Friendship"
+    ]
+   ]
+  },
+  {
+   "idx": 142,
+   "question": "Who was the mother of the person who found the sacred writings that became the Book of Mormon?",
+   "brgd_rounds": [
+    [
+     "lucy mack smith",
+     "joseph smith jr."
+    ],
+    [
+     "lucy mack smith",
+     "joseph smith jr."
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Joseph Smith",
+     "Lucy Mack Smith"
+    ],
+    [
+     "Joseph Smith",
+     "Lucy Mack Smith"
+    ],
+    [
+     "Joseph Smith",
+     "Lucy Mack Smith"
+    ]
+   ]
+  },
+  {
+   "idx": 143,
+   "question": "Between which years was the war with the person who suffered a great amount of losses battling the Roman army?",
+   "brgd_rounds": [
+    [
+     "hannibal",
+     "second punic war"
+    ],
+    [
+     "hannibal",
+     "second punic war"
+    ]
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Hannibal",
+     "Second Punic War"
+    ],
+    [
+     "Hannibal",
+     "Second Punic War"
+    ],
+    [
+     "Hannibal",
+     "Second Punic War"
+    ]
+   ]
+  },
+  {
+   "idx": 144,
+   "question": "What was the percentage that the Dow Jones fell when the US had the highest unemployment rate?",
+   "brgd_rounds": [
+    [
+     "great depression",
+     "25%",
+     "1933",
+     "bureau of labor statistics",
+     "djia"
+    ],
+    [
+     "great depression",
+     "1933",
+     "may 1933",
+     "dow jones industrial average",
+     "unemployment peak"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Dow Jones",
+     "Great Depression"
+    ],
+    [
+     "Dow Jones",
+     "Great Depression"
+    ],
+    [
+     "Dow Jones",
+     "Great Depression"
+    ]
+   ]
+  },
+  {
+   "idx": 145,
+   "question": "What is the highest city in the state where Dell ranks sixth by revenue?",
+   "brgd_rounds": [
+    [
+     "texas",
+     "houston"
+    ],
+    [
+     "fort davis",
+     "texas"
+    ]
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Dell",
+     "Texas"
+    ],
+    [
+     "Dell",
+     "Texas"
+    ],
+    [
+     "Dell",
+     "Texas"
+    ]
+   ]
+  },
+  {
+   "idx": 146,
+   "question": "When was the most recent Bicycle Friendly Community Award given to the city where the company Study in Brown's record label is part of is headquartered?",
+   "brgd_rounds": [
+    [
+     "study in brown",
+     "record label",
+     "headquarters"
+    ],
+    [
+     "emarcy records"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Santa Monica",
+     "Bicycle Friendly Community Award"
+    ],
+    [
+     "Santa Monica",
+     "Bicycle Friendly Community Award"
+    ],
+    [
+     "Study in Brown",
+     "Santa Monica"
+    ]
+   ]
+  },
+  {
+   "idx": 147,
+   "question": "What is the dynasty the oldest wooden buildings in China be dated to an example of?",
+   "brgd_rounds": [
+    [
+     "tang dynasty",
+     "oldest surviving wooden halls"
+    ]
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "oldest wooden buildings in China",
+     "Tang dynasty"
+    ],
+    [
+     "oldest wooden buildings in China",
+     "Tang dynasty"
+    ],
+    [
+     "oldest wooden buildings in China",
+     "Tang dynasty"
+    ]
+   ]
+  },
+  {
+   "idx": 148,
+   "question": "Along with the Closer performer, what notable pop artist started out his career on adult contemporary radio?",
+   "brgd_rounds": [
+    [
+     "the chainsmokers",
+     "drew taggart",
+     "celine dion",
+     "josh groban"
+    ],
+    [
+     "josh groban",
+     "closer",
+     "adult contemporary radio"
+    ]
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "The Chainsmokers",
+     "Halsey"
+    ],
+    [
+     "Closer",
+     "adult contemporary radio"
+    ],
+    [
+     "Josh Groban",
+     "Michael Bubl\u00e9"
+    ]
+   ]
+  },
+  {
+   "idx": 149,
+   "question": "What is the meaning of the word that is also a majority religion in India when the country where Banna is located was created in the Arabic dictionary?",
+   "brgd_rounds": [
+    [
+     "hindu",
+     "al-hind",
+     "pakistan",
+     "arabic dictionary",
+     "1947"
+    ],
+    [
+     "lis\u0101n al-\u02bfarab",
+     "taj al-\u02bfarus",
+     "arabic lexicography",
+     "al-hind",
+     "hindu"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "India",
+     "Banna"
+    ],
+    [
+     "India",
+     "Hindu"
+    ],
+    [
+     "India",
+     "Hinduism"
+    ]
+   ]
+  },
+  {
+   "idx": 150,
+   "question": "Normalization occurred in Country A that invaded Country B because the military branch was unprepared. Country B was the only communist country to have an embassy where?",
+   "brgd_rounds": [
+    [
+     "yugoslavia",
+     "paraguay",
+     "alfredo stroessner"
+    ]
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Yugoslavia",
+     "Paraguay"
+    ],
+    [
+     "Yugoslavia",
+     "Paraguay"
+    ],
+    [
+     "Yugoslavia",
+     "Paraguay"
+    ]
+   ]
+  },
+  {
+   "idx": 151,
+   "question": "Who owns the record label of the Another Page performer?",
+   "brgd_rounds": [
+    [
+     "jive records",
+     "rca records",
+     "sony bmg",
+     "interscope-geffen-a&m",
+     "19 entertainment"
+    ],
+    [
+     "christopher cross",
+     "another page",
+     "rca records",
+     "sony bmg",
+     "interscope-geffen-a&m"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Another Page",
+     "performer"
+    ],
+    [
+     "Another Page",
+     "performer"
+    ],
+    [
+     "Christopher Cross",
+     "Warner Bros. Records"
+    ]
+   ]
+  },
+  {
+   "idx": 152,
+   "question": "When was the region that lies to the north of where Israel is located and the location of Operation Earnest Will established?",
+   "brgd_rounds": [
+    [
+     "lebanon",
+     "operation earnest will",
+     "persian gulf",
+     "strait of hormuz"
+    ],
+    [
+     "lebanon",
+     "strait of hormuz",
+     "iran\u2013iraq war"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Lebanon",
+     "Operation Earnest Will"
+    ],
+    [
+     "Lebanon",
+     "Operation Earnest Will"
+    ],
+    [
+     "Lebanon",
+     "Persian Gulf"
+    ]
+   ]
+  },
+  {
+   "idx": 153,
+   "question": "What day is the feast held, in the city that holds the headquarters of the only music company that is larger than the record label of Vilaiyaadu Mankatha?",
+   "brgd_rounds": [
+    [
+     "sony music entertainment",
+     "las palmas de gran canaria",
+     "carnival of las palmas"
+    ],
+    [
+     "sony music entertainment",
+     "universal music group",
+     "amsterdam",
+     "carnival",
+     "feast"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Vilaiyaadu Mankatha",
+     "Sony Music Entertainment"
+    ],
+    [
+     "Vilaiyaadu Mankatha",
+     "music company"
+    ],
+    [
+     "Vilaiyaadu Mankatha",
+     "Universal Music Group"
+    ]
+   ]
+  },
+  {
+   "idx": 154,
+   "question": "What company is the record label of Magic Christian Music part of?",
+   "brgd_rounds": [
+    [
+     "apple records",
+     "apple corps ltd",
+     "the beatles"
+    ],
+    [
+     "apple corps ltd",
+     "beatles",
+     "apple records"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Magic Christian Music",
+     "Apple Records"
+    ],
+    [
+     "Magic Christian Music",
+     "Apple Records"
+    ],
+    [
+     "Magic Christian Music",
+     "Apple Corps Ltd."
+    ]
+   ]
+  },
+  {
+   "idx": 155,
+   "question": "What is the competition the 1972 Federation Cup is part of named after?",
+   "brgd_rounds": [
+    [
+     "international tennis federation",
+     "itf",
+     "1963",
+     "50th anniversary"
+    ],
+    [
+     "international tennis federation",
+     "itf",
+     "fed cup",
+     "1963",
+     "50th anniversary"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "1972 Federation Cup",
+     "International Tennis Federation"
+    ],
+    [
+     "1972 Federation Cup",
+     "International Tennis Federation"
+    ],
+    [
+     "1972 Federation Cup",
+     "International Tennis Federation"
+    ]
+   ]
+  },
+  {
+   "idx": 156,
+   "question": "When was the last time Tony Richard's team beat the 1894-95 FA Cup Winner?",
+   "brgd_rounds": [
+    [
+     "sheffield united",
+     "notts county",
+     "fa cup winners",
+     "1894-95 fa cup"
+    ],
+    [
+     "sheffield united",
+     "notts county",
+     "1893-94 fa cup",
+     "1894-95 fa cup",
+     "tony richard"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Tony Richard",
+     "1894\u201395 FA Cup Winner"
+    ],
+    [
+     "Tony Richard",
+     "1894\u201395 FA Cup Winner"
+    ],
+    [
+     "Tony Richard",
+     "1894\u201395 FA Cup Winner"
+    ]
+   ]
+  },
+  {
+   "idx": 157,
+   "question": "When did the city where the headquarters of Barton Premium Blend's manufacturer is located elect its first black mayor?",
+   "brgd_rounds": [
+    [
+     "bardstown",
+     "kentucky",
+     "sazerac company",
+     "barton 1792 distillery"
+    ],
+    [
+     "bardstown",
+     "kentucky",
+     "sazerac company",
+     "barton 1792 distillery"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Barton Premium Blend",
+     "Sazerac Company"
+    ],
+    [
+     "Barton Premium Blend",
+     "Sazerac Company"
+    ],
+    [
+     "Barton Premium Blend",
+     "Bardstown"
+    ]
+   ]
+  },
+  {
+   "idx": 158,
+   "question": "When did the majority party in the body which determines the rules of the US House and US Senate gain control of the House?",
+   "brgd_rounds": [
+    [
+     "114th congress",
+     "2014 elections",
+     "january 3 2015",
+     "republican party",
+     "house of representatives"
+    ],
+    [
+     "114th congress",
+     "january 3 2015",
+     "2014 elections",
+     "republican party",
+     "house of representatives"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "One Hundred Fourteenth United States Congress",
+     "2014 elections"
+    ],
+    [
+     "Republicans",
+     "US House"
+    ],
+    [
+     "US House",
+     "majority party"
+    ]
+   ]
+  },
+  {
+   "idx": 159,
+   "question": "Where did the arguer that Dmitry Okhotsimsky's country of citizenship had become an imperialist power declare he would intervene in the Korean conflict?",
+   "brgd_rounds": [
+    [
+     "tito-stalin split",
+     "yugoslavia",
+     "social imperialism",
+     "trotskyist",
+     "kim il-sung"
+    ],
+    [
+     "yugoslavia",
+     "tito-stalin split",
+     "mao zedong",
+     "nikita khrushchev",
+     "trotskyist"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Dmitry Okhotsimsky",
+     "Soviet Union"
+    ],
+    [
+     "Dmitry Okhotsimsky",
+     "Korean conflict"
+    ],
+    [
+     "Dmitry Okhotsimsky",
+     "Korean conflict"
+    ]
+   ]
+  },
+  {
+   "idx": 160,
+   "question": "Who did the person Sarah married to in the bible marry after the death of Sarah?",
+   "brgd_rounds": [
+    [
+     "keturah",
+     "abraham"
+    ]
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Sarah",
+     "Abraham"
+    ],
+    [
+     "Sarah",
+     "Abraham"
+    ],
+    [
+     "Sarah",
+     "Abraham"
+    ]
+   ]
+  },
+  {
+   "idx": 161,
+   "question": "Where is the origin of the river that Kraai River is a tributary of?",
+   "brgd_rounds": [
+    [
+     "orange river",
+     "aliwal north"
+    ],
+    [
+     "orange river",
+     "maloti mountains",
+     "drakensberg",
+     "lesotho",
+     "thaba putsoa"
+    ]
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Kraai River",
+     "Orange River"
+    ],
+    [
+     "Kraai River",
+     "Orange River"
+    ],
+    [
+     "Kraai River",
+     "Orange River"
+    ]
+   ]
+  },
+  {
+   "idx": 162,
+   "question": "Who created the work that features the appearance of Cosmic Boy?",
+   "brgd_rounds": [
+    [
+     "legion of super heroes",
+     "otto binder",
+     "al plastino",
+     "dc comics"
+    ],
+    [
+     "legion of super heroes",
+     "adventure comics",
+     "otto binder",
+     "al plastino",
+     "dc comics"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Cosmic Boy",
+     "Otto Binder"
+    ],
+    [
+     "Cosmic Boy",
+     "Action Comics"
+    ],
+    [
+     "Cosmic Boy",
+     "Legion of Super Heroes"
+    ]
+   ]
+  },
+  {
+   "idx": 163,
+   "question": "What is the league of the Carolina Panthers an example of?",
+   "brgd_rounds": [
+    [
+     "national football league",
+     "nfc south",
+     "national football conference",
+     "professional sports league",
+     "american football"
+    ],
+    [
+     "major professional sports league",
+     "closed league",
+     "single-entity league",
+     "franchise-based league",
+     "nfc south"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Carolina Panthers",
+     "National Football League"
+    ],
+    [
+     "Carolina Panthers",
+     "National Football League"
+    ],
+    [
+     "Carolina Panthers",
+     "National Football League"
+    ]
+   ]
+  },
+  {
+   "idx": 164,
+   "question": "When was the region that lies to the north of the region where Strangers No More took place and the Persian Gulf created?",
+   "brgd_rounds": [
+    [
+     "strangers no more",
+     "iran",
+     "iraq",
+     "persian gulf",
+     "mesopotamia"
+    ],
+    [
+     "strangers no more",
+     "israel",
+     "tel aviv",
+     "documentary",
+     "immigrant children"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Strangers No More",
+     "Persian Gulf"
+    ],
+    [
+     "Strangers No More",
+     "Persian Gulf"
+    ],
+    [
+     "Strangers No More",
+     "Persian Gulf"
+    ]
+   ]
+  },
+  {
+   "idx": 165,
+   "question": "What is the date of birth for the performer of Hits?",
+   "brgd_rounds": [
+    [
+     "peaches & herb",
+     "the zombies",
+     "neil young",
+     "mats olin"
+    ],
+    [
+     "mauro scocco"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "performer of Hits",
+     "Hits"
+    ],
+    [
+     "performer of Hits",
+     "Hits"
+    ],
+    [
+     "Hits",
+     "performer"
+    ]
+   ]
+  },
+  {
+   "idx": 166,
+   "question": "When did the city where the author of Sacerdotii Nostri Primordia died become its own country?",
+   "brgd_rounds": [
+    [
+     "pope john xxiii"
+    ],
+    [
+     "vatican city",
+     "lateran treaty",
+     "11 february 1929"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Sacerdotii Nostri Primordia",
+     "Pope John XXIII"
+    ],
+    [
+     "Sacerdotii Nostri Primordia",
+     "Pope John XXIII"
+    ],
+    [
+     "Sacerdotii Nostri Primordia",
+     "Pope John XXIII"
+    ]
+   ]
+  },
+  {
+   "idx": 167,
+   "question": "In which state is P\u00f3voa de Santa Iria's municipality located?",
+   "brgd_rounds": [
+    [
+     "vila franca de xira",
+     "lisbon district",
+     "portugal"
+    ],
+    [
+     "lisbon district",
+     "vila franca de xira",
+     "civil parish",
+     "portugal administrative divisions"
+    ]
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "P\u00f3voa de Santa Iria",
+     "Vila Franca de Xira"
+    ],
+    [
+     "P\u00f3voa de Santa Iria",
+     "Vila Franca de Xira"
+    ],
+    [
+     "P\u00f3voa de Santa Iria",
+     "Vila Franca de Xira"
+    ]
+   ]
+  },
+  {
+   "idx": 168,
+   "question": "When was the company that makes Skyflash abolished?",
+   "brgd_rounds": [
+    [
+     "british aerospace",
+     "bae systems",
+     "aerospatiale",
+     "airbus"
+    ],
+    [
+     "british aerospace",
+     "bae systems",
+     "skyflash",
+     "marconi electronic systems"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Skyflash",
+     "British Aerospace"
+    ],
+    [
+     "Skyflash",
+     "British Aerospace"
+    ],
+    [
+     "Skyflash",
+     "British Aerospace"
+    ]
+   ]
+  },
+  {
+   "idx": 169,
+   "question": "Where was the founder of the National Women's Party born?",
+   "brgd_rounds": [
+    [
+     "alice paul"
+    ],
+    [
+     "alice paul",
+     "national woman's party"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "National Women's Party",
+     "Alice Paul"
+    ],
+    [
+     "National Women's Party",
+     "Alice Paul"
+    ],
+    [
+     "National Women's Party",
+     "Alice Paul"
+    ]
+   ]
+  },
+  {
+   "idx": 170,
+   "question": "How many times did plague occur in the place where Bajazet's composer was born?",
+   "brgd_rounds": [
+    [
+     "antonio vivaldi",
+     "venice"
+    ],
+    [
+     "venice",
+     "plague outbreaks"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Bajazet",
+     "Antonio Vivaldi"
+    ],
+    [
+     "Bajazet",
+     "Antonio Lucio Vivaldi"
+    ],
+    [
+     "Bajazet",
+     "Antonio Vivaldi"
+    ]
+   ]
+  },
+  {
+   "idx": 171,
+   "question": "In Batman Under the Red Hood, who does the actor of Barney Stinson from How I Met Your Mother play?",
+   "brgd_rounds": [
+    [
+     "neil patrick harris"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Batman Under the Red Hood",
+     "Neil Patrick Harris"
+    ],
+    [
+     "Batman Under the Red Hood",
+     "How I Met Your Mother"
+    ],
+    [
+     "Batman Under the Red Hood",
+     "How I Met Your Mother"
+    ]
+   ]
+  },
+  {
+   "idx": 172,
+   "question": "Who is the city where Lesnoye Sanatorium is located named after?",
+   "brgd_rounds": [
+    [
+     "tolyatti"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Lesnoye Sanatorium",
+     "Tolyatti"
+    ],
+    [
+     "Lesnoye Sanatorium",
+     "Tolyatti"
+    ],
+    [
+     "Lesnoye Sanatorium",
+     "Tolyatti"
+    ]
+   ]
+  },
+  {
+   "idx": 173,
+   "question": "When was one internet browser's version of Windows 8 made accessible?",
+   "brgd_rounds": [
+    [
+     "firefox",
+     "chrome",
+     "metro-style",
+     "aurora",
+     "september 2013"
+    ]
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Firefox",
+     "Windows 8"
+    ],
+    [
+     "Firefox",
+     "Windows 8"
+    ],
+    [
+     "Firefox",
+     "Windows 8"
+    ]
+   ]
+  },
+  {
+   "idx": 174,
+   "question": "When was the Palau de la Generalitat constructed in the city where Martin of the region of Pedrola died?",
+   "brgd_rounds": [
+    [
+     "barcelona",
+     "pedrola",
+     "aragon",
+     "zaragoza"
+    ],
+    [
+     "pedrola",
+     "zaragoza",
+     "barcelona",
+     "aragon",
+     "spain"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Palau de la Generalitat",
+     "Pedrola"
+    ],
+    [
+     "Palau de la Generalitat",
+     "Barcelona"
+    ],
+    [
+     "Palau de la Generalitat",
+     "Martin of Pedrola"
+    ]
+   ]
+  },
+  {
+   "idx": 175,
+   "question": "Who won the indy car race in the largest populated city in the state that the performer of Changes Two is from?",
+   "brgd_rounds": [
+    [
+     "changes two",
+     "will power",
+     "indianapolis",
+     "indiana"
+    ],
+    [
+     "charles mingus",
+     "arizona",
+     "california",
+     "new york city"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Changes Two",
+     "performer"
+    ],
+    [
+     "Charles Mingus",
+     "California"
+    ],
+    [
+     "David Bowie",
+     "London"
+    ]
+   ]
+  },
+  {
+   "idx": 176,
+   "question": "When did the city that contains the basilica named after the saint who is holding a knife in the last supper become a country?",
+   "brgd_rounds": [
+    [
+     "st. bartholomew",
+     "vatican city",
+     "rome",
+     "basilica of san bartolomeo all'isola",
+     "tiber island"
+    ],
+    [
+     "saint bartholomew",
+     "basilica di san bartolomeo all\u2019isola",
+     "vatican city"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "St. Peter's Basilica",
+     "Vatican City"
+    ],
+    [
+     "St. Peter's Basilica",
+     "Vatican City"
+    ],
+    [
+     "St. Peter's Basilica",
+     "Vatican City"
+    ]
+   ]
+  },
+  {
+   "idx": 177,
+   "question": "What was the role of God in the Biblical crossing of the sea where herbivorous fishes have been seen feeding on gelatinous zooplankton?",
+   "brgd_rounds": [
+    [
+     "red sea",
+     "exodus 14",
+     "ctenophores"
+    ],
+    [
+     "exodus 14",
+     "red sea",
+     "ctenophores",
+     "gelatinous zooplankton",
+     "herbivorous fishes"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "God",
+     "Red Sea"
+    ],
+    [
+     "God",
+     "Red Sea"
+    ],
+    [
+     "God",
+     "Red Sea"
+    ]
+   ]
+  },
+  {
+   "idx": 178,
+   "question": "Who wrote Turn Me On by the performer of Live from Austin, TX?",
+   "brgd_rounds": [
+    [
+     "norah jones",
+     "john d. loudermilk"
+    ]
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Norah Jones",
+     "John D. Loudermilk"
+    ],
+    [
+     "Turn Me On",
+     "Live from Austin, TX"
+    ],
+    [
+     "Norah Jones",
+     "John D. Loudermilk"
+    ]
+   ]
+  },
+  {
+   "idx": 179,
+   "question": "What county is the city that shares a border with the state capital of the state where Andrew Deveaux was born located in?",
+   "brgd_rounds": [
+    [
+     "south carolina",
+     "columbia",
+     "lafayette county",
+     "orange county",
+     "mississippi"
+    ],
+    [
+     "cayce",
+     "west columbia",
+     "irmo",
+     "lexington county",
+     "richland county"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Andrew Deveaux",
+     "South Carolina"
+    ],
+    [
+     "Andrew Deveaux",
+     "South Carolina"
+    ],
+    [
+     "Andrew Deveaux",
+     "South Carolina"
+    ]
+   ]
+  },
+  {
+   "idx": 180,
+   "question": "There is a video game named after the sports association that chooses where the super bowl is held. What was Nintendo's limit on games per developer per year on that game's platform?",
+   "brgd_rounds": [
+    [
+     "nfl",
+     "nes",
+     "super play action football",
+     "nfl football",
+     "super nes"
+    ],
+    [
+     "nfl",
+     "nes",
+     "five games per year"
+    ]
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "NFL",
+     "Nintendo"
+    ],
+    [
+     "NFL",
+     "Nintendo"
+    ],
+    [
+     "NFL",
+     "Nintendo"
+    ]
+   ]
+  },
+  {
+   "idx": 181,
+   "question": "What century did the author of A Treatise Concerning the Principles of Human Knowledge live in?",
+   "brgd_rounds": [
+    [
+     "george berkeley",
+     "1685\u20131753"
+    ]
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "George Berkeley",
+     "A Treatise Concerning the Principles of Human Knowledge"
+    ],
+    [
+     "George Berkeley",
+     "A Treatise Concerning the Principles of Human Knowledge"
+    ],
+    [
+     "George Berkeley",
+     "A Treatise Concerning the Principles of Human Knowledge"
+    ]
+   ]
+  },
+  {
+   "idx": 182,
+   "question": "Which county shares a border with the county where the most populous city in the state where armed robbery is a capital crime is located?",
+   "brgd_rounds": [
+    [
+     "georgia",
+     "atlanta",
+     "fulton county"
+    ],
+    [
+     "georgia",
+     "atlanta",
+     "fulton county"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Georgia",
+     "Fulton County"
+    ],
+    [
+     "Georgia",
+     "Fulton County"
+    ],
+    [
+     "Georgia",
+     "Fulton County"
+    ]
+   ]
+  },
+  {
+   "idx": 183,
+   "question": "What region is directly north of where Israel and the final destination of export crops is?",
+   "brgd_rounds": [
+    [
+     "lebanon",
+     "dammam",
+     "saudi arabia",
+     "agricultural exports",
+     "export crops"
+    ],
+    [
+     "lebanon",
+     "agricultural exports",
+     "eu",
+     "united states",
+     "russia"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Israel",
+     "Lebanon"
+    ],
+    [
+     "Israel",
+     "Lebanon"
+    ],
+    [
+     "Israel",
+     "Lebanon"
+    ]
+   ]
+  },
+  {
+   "idx": 184,
+   "question": "Where is the Bridge of Sighs located in the place of death of Sonata pian'e forte's composer?",
+   "brgd_rounds": [
+    [
+     "giovanni gabrieli",
+     "venice"
+    ],
+    [
+     "venice",
+     "giovanni gabrieli"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Sonata pian'e forte",
+     "Giovanni Gabrieli"
+    ],
+    [
+     "Sonata pian'e forte",
+     "Giovanni Gabrieli"
+    ],
+    [
+     "Sonata pian'e forte",
+     "Giovanni Gabrieli"
+    ]
+   ]
+  },
+  {
+   "idx": 185,
+   "question": "Who owns the record label of the Lovin' All Night performer?",
+   "brgd_rounds": [
+    [
+     "rodney crowell",
+     "life is messy",
+     "1992"
+    ],
+    [
+     "rodney crowell",
+     "life is messy",
+     "1992"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Rodney Crowell",
+     "Lovin' All Night"
+    ],
+    [
+     "Rodney Crowell",
+     "Life Is Messy"
+    ],
+    [
+     "Rodney Crowell",
+     "Warner Bros. Records"
+    ]
+   ]
+  },
+  {
+   "idx": 186,
+   "question": "Who many major sports centers are located in where the Yongle Emporer did great who the edict was addressed to?",
+   "brgd_rounds": [
+    [
+     "nanjing",
+     "deshin shekpa",
+     "karmapa lama",
+     "linggu temple"
+    ],
+    [
+     "nanjing",
+     "deshin shekpa"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Yongle Emperor",
+     "edict"
+    ],
+    [
+     "Yongle Emperor",
+     "Nanjing"
+    ],
+    [
+     "Yongle Emperor",
+     "edict"
+    ]
+   ]
+  },
+  {
+   "idx": 187,
+   "question": "What worldwide ranking does the university where Manuel Isa\u00edas L\u00f3pez was educated hold?",
+   "brgd_rounds": [
+    [
+     "unam",
+     "national autonomous university of mexico"
+    ],
+    [
+     "national autonomous university of mexico",
+     "unam"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Manuel Isa\u00edas L\u00f3pez",
+     "university"
+    ],
+    [
+     "Manuel Isa\u00edas L\u00f3pez",
+     "UNAM"
+    ],
+    [
+     "Manuel Isa\u00edas L\u00f3pez",
+     "UNAM"
+    ]
+   ]
+  },
+  {
+   "idx": 188,
+   "question": "What is the Arabic dictionary meaning of the word referring to the majority religion in the area of British India, that became India when the country containing Barawal was formed?",
+   "brgd_rounds": [
+    [
+     "al-hind",
+     "hindu",
+     "hindav\u012b",
+     "islam",
+     "british india"
+    ],
+    [
+     "lis\u0101n al-\u02bfarab",
+     "taj al-\u02bfar\u016bs",
+     "al-hind\u016b",
+     "al-hind\u012b",
+     "hindav\u012b"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "British India",
+     "Barawal"
+    ],
+    [
+     "British India",
+     "Hinduism"
+    ],
+    [
+     "British India",
+     "Barawal"
+    ]
+   ]
+  },
+  {
+   "idx": 189,
+   "question": "What river does the system containing Umchabezi River serve as the mouth of?",
+   "brgd_rounds": [
+    [
+     "mzingwane river",
+     "limpopo river"
+    ]
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Umchabezi River",
+     "Limpopo River"
+    ],
+    [
+     "Umchabezi River",
+     "Limpopo River"
+    ],
+    [
+     "Umchabezi River",
+     "Limpopo River"
+    ]
+   ]
+  },
+  {
+   "idx": 190,
+   "question": "What was the original name of the bank that bought FleetBoston Financial?",
+   "brgd_rounds": [
+    [
+     "bank of italy",
+     "amadeo pietro giannini",
+     "1904",
+     "1930"
+    ]
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Bank of America",
+     "FleetBoston Financial"
+    ],
+    [
+     "Bank of America",
+     "FleetBoston Financial"
+    ],
+    [
+     "Bank of America",
+     "FleetBoston Financial"
+    ]
+   ]
+  },
+  {
+   "idx": 191,
+   "question": "The actor who played Thelma in \"Thelma and Louise\" also played which character in \"A League of Their Own\"?",
+   "brgd_rounds": [
+    [
+     "geena davis",
+     "dottie hinson",
+     "a league of their own"
+    ],
+    [
+     "dottie hinson",
+     "geena davis",
+     "a league of their own"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Thelma and Louise",
+     "A League of Their Own"
+    ],
+    [
+     "Thelma and Louise",
+     "A League of Their Own"
+    ],
+    [
+     "Thelma and Louise",
+     "A League of Their Own"
+    ]
+   ]
+  },
+  {
+   "idx": 192,
+   "question": "What were the Genesis's advantages over the platform of the game Nightshade?",
+   "brgd_rounds": [
+    [
+     "nightshade",
+     "sega genesis",
+     "mega drive",
+     "16-bit architectures",
+     "turbografx-16"
+    ],
+    [
+     "nes",
+     "sega genesis",
+     "16-bit",
+     "8-bit",
+     "beam software"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Genesis",
+     "Nightshade"
+    ],
+    [
+     "Genesis",
+     "Nightshade"
+    ],
+    [
+     "Genesis",
+     "Nightshade"
+    ]
+   ]
+  },
+  {
+   "idx": 193,
+   "question": "Which season was the runner up of the third season of American Idol on?",
+   "brgd_rounds": [
+    [
+     "diana degarmo",
+     "season 3",
+     "fantasia barrino"
+    ],
+    [
+     "diana degarmo",
+     "ace young",
+     "season 5",
+     "broadway"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "American Idol",
+     "third season"
+    ],
+    [
+     "American Idol",
+     "third season"
+    ],
+    [
+     "American Idol",
+     "third season"
+    ]
+   ]
+  },
+  {
+   "idx": 194,
+   "question": "Where did the person who sponsored the resolution to reopen trade with Vietnam along with Kerry go to college?",
+   "brgd_rounds": [
+    [
+     "john mccain"
+    ],
+    [
+     "john mccain"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "John McCain",
+     "United States Naval Academy"
+    ],
+    [
+     "John McCain",
+     "National War College"
+    ],
+    [
+     "John McCain",
+     "Kerry"
+    ]
+   ]
+  },
+  {
+   "idx": 195,
+   "question": "When was the last time the team Matthew Webb was a member of beat the winner of the 1894-95 FA Cup?",
+   "brgd_rounds": [
+    [
+     "birmingham city",
+     "aston villa",
+     "1894-95 fa cup",
+     "notts county"
+    ],
+    [
+     "aston villa",
+     "birmingham city",
+     "1894\u201395 fa cup",
+     "notts county"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Matthew Webb",
+     "Wolverhampton Wanderers"
+    ],
+    [
+     "Matthew Webb",
+     "Aston Villa"
+    ],
+    [
+     "Matthew Webb",
+     "1894\u201395 FA Cup"
+    ]
+   ]
+  },
+  {
+   "idx": 196,
+   "question": "Who is the president of the newly declared independent country that formed the Timor Leste Commission of Truth and Friendship with the country where Pantar is found?",
+   "brgd_rounds": [
+    [
+     "indonesia",
+     "timor-leste",
+     "xanana gusm\u00e3o",
+     "jos\u00e9 ramos-horta",
+     "pantar"
+    ],
+    [
+     "xanana gusm\u00e3o",
+     "indonesia",
+     "timor-leste",
+     "jos\u00e9 ramos-horta",
+     "august 2005"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Timor-Leste",
+     "Indonesia"
+    ],
+    [
+     "Timor-Leste",
+     "Indonesia"
+    ],
+    [
+     "Timor-Leste",
+     "Indonesia"
+    ]
+   ]
+  },
+  {
+   "idx": 197,
+   "question": "Who plays the legendary figure featured in Historia Regum Britanniae in the show Once Upon a Time?",
+   "brgd_rounds": [
+    [
+     "king arthur",
+     "geoffrey of monmouth",
+     "once upon a time"
+    ],
+    [
+     "king arthur",
+     "once upon a time",
+     "geoffrey of monmouth"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Historia Regum Britanniae",
+     "Once Upon a Time"
+    ],
+    [
+     "Historia Regum Britanniae",
+     "Once Upon a Time"
+    ],
+    [
+     "Historia Regum Britanniae",
+     "Once Upon a Time"
+    ]
+   ]
+  },
+  {
+   "idx": 198,
+   "question": "After the period which limited the supply of shellac; Bia\u0142ystok, Przemy\u015bl were returned to what country along with the region they had been given in the Treaty of Sch\u00f6nbrunn?",
+   "brgd_rounds": [
+    [
+     "treaty of sch\u00f6nbrunn",
+     "duchy of warsaw",
+     "west galicia",
+     "belostok oblast",
+     "polish people's republic"
+    ],
+    [
+     "west galicia",
+     "duchy of warsaw",
+     "treaty of tilsit",
+     "belostok oblast"
+    ],
+    []
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Bia\u0142ystok",
+     "Przemy\u015bl"
+    ],
+    [
+     "Bia\u0142ystok",
+     "Przemy\u015bl"
+    ],
+    [
+     "Treaty of Sch\u00f6nbrunn",
+     "Bia\u0142ystok"
+    ]
+   ]
+  },
+  {
+   "idx": 199,
+   "question": "What team is the highest goal scorer in the EPL a member of?",
+   "brgd_rounds": [
+    [
+     "mohamed salah",
+     "liverpool"
+    ]
+   ],
+   "iter_rounds_reconstructed": [
+    [
+     "Mohamed Salah",
+     "Liverpool"
+    ],
+    [
+     "Alan Shearer",
+     "EPL"
+    ],
+    [
+     "Alan Shearer",
+     "EPL"
+    ]
+   ]
+  }
+ ]
+}
