@@ -106,3 +106,13 @@ no reconstruction). ITER-RETGEN repeats near-verbatim; BRGD turns over each roun
 - Embedding similarity is comparable (both stay on the question topic) → the echo is *lexical/verbatim*, not semantic.
 - NER+ITER per-round seeds were never logged (round_diagnostics empty in all iterretgen runs);
   seed-level numbers (0.72 cross-round overlap) are from a `query_ner` reconstruction (proxy) — use text metrics above instead.
+
+### 2WikiMultiHopQA (same metrics)
+| metric (consecutive rounds) | BRGD | NER+ITER |
+|---|---|---|
+| Jaccard unigram | 0.384 | 0.621 |
+| Jaccard bigram | 0.158 | 0.478 |
+| ROUGE-L | 0.358 | 0.641 |
+| difflib sequence-ratio | 0.205 | 0.582 |
+
+Echo is even stronger on 2Wiki (ITER up to 2.8x more repetitive). Consistent both datasets.
