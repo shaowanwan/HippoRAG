@@ -116,3 +116,19 @@ no reconstruction). ITER-RETGEN repeats near-verbatim; BRGD turns over each roun
 | difflib sequence-ratio | 0.205 | 0.582 |
 
 Echo is even stronger on 2Wiki (ITER up to 2.8x more repetitive). Consistent both datasets.
+
+## 6. Cross-round persistence ablation (MuSiQue 1000, NER, proper version)
+FULL = bridges accumulate across rounds; − persistence = each round seeds only the previous round's
+bridges (NO_PERSISTENCE flag). Both at SEED_DECAY=1.0, on branch `experiment/no-persistence-ablation`.
+
+| | EM | F1 | R@1 | R@5 | baseline EM | baseline R@5 |
+|---|---|---|---|---|---|---|
+| FULL persistence | .409 | .509 | .223 | .635 | .259 | .467 |
+| − persistence | .399 | .496 | .223 | .623 | .246 | .467 |
+| Δ | +1.0 | +1.3 | 0.0 | **+1.2** | (reader noise) | (identical) |
+
+- R@5 is the clean signal (baseline R@5 identical .467): persistence gives **+1.2pp R@5**.
+- R@1 unchanged; EM Δ confounded by cross-run reader-QA noise (baseline EM .259 vs .246) — lift-controlled ≈ 0.
+- FULL (.409) ≈ SEED_DECAY=1.0 (25218, .406) → base validated.
+- Takeaway: persistence is a small retrieval-level contributor, **not an EM driver**; the gain is the bridge injection itself.
+- NOTE: the old "decay=0" row (.365) was a degenerate no-bridge case, NOT no-persistence; it overstated persistence's value. Use this proper ablation.
