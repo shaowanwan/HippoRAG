@@ -40,3 +40,17 @@ Both methods call the same LLM, so the difference is not what the model knows bu
 
 This is systematic, not a bad case: on 2WikiMultiHopQA, 86.5% of ITER-RETGEN's head-to-head losses
 are "produced the bridge entity but retrieval did not fetch the gold passage" (failure breakdown).
+
+## Per-round metrics (in the figure)
+gold = 2 passages: "Get Carter (2000 film)" (hop-1) + "Stephen Kay" (hop-2).
+
+| round | ITER R@5 | BRGD R@5 (rrf) |
+|---|---|---|
+| R1 / R0 | 0.50 | 0.50 |
+| R2 / R1 | 0.50 | 1.00 |
+| R3 | 0.50 | — |
+| **final EM** | **0** | **1** |
+
+- ITER R@5 flat at 0.50 across all three rounds: it always retrieves the film page, never Stephen Kay's bio.
+- BRGD R@5 climbs 0.50 -> 1.00 once the bridge (Stephen Kay) is injected.
+- ITER per-round recall is reconstructed (deterministic `retrieve` on its logged round queries = question + prev generation); BRGD's is logged in round_diagnostics (rrf_recall).
