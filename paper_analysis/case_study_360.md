@@ -54,3 +54,10 @@ gold = 2 passages: "Get Carter (2000 film)" (hop-1) + "Stephen Kay" (hop-2).
 - ITER R@5 flat at 0.50 across all three rounds: it always retrieves the film page, never Stephen Kay's bio.
 - BRGD R@5 climbs 0.50 -> 1.00 once the bridge (Stephen Kay) is injected.
 - ITER per-round recall is reconstructed (deterministic `retrieve` on its logged round queries = question + prev generation); BRGD's is logged in round_diagnostics (rrf_recall).
+
+## KEY: BRGD's hypothesised context is WRONG here (strong grounding evidence)
+BRGD's R0 trace hypothesises "likely a **U.S.-based director** with ties to Warner Bros." — i.e. its
+parametric guess is **wrong** (Kay is New Zealand-born). The correct answer comes only from the
+retrieved biography in R1 ("New Zealand-born American"). So BRGD does NOT answer from world knowledge;
+the hypothesis only steers retrieval, and the retrieved document decides the answer. This is the
+cleanest rebuttal to the "BRGD just uses memorisation" concern — its memory guessed US.
